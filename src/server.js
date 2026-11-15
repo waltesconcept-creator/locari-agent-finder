@@ -44,21 +44,35 @@ app.use((req, res, next) => {
 
 // Start Server
 if (require.main === module) {
-  const server = app.listen(PORT, () => {
-    console.log(`====================================================`);
-    console.log(`  🚀 LOCARI AGENT FINDER ENGINE RUNNING`);
-    console.log(`  Local URL:   http://localhost:${PORT}`);
-    console.log(`  API Status:  http://localhost:${PORT}/health`);
-    console.log(`  Database:    Active (SQLite WAL mode)`);
-    console.log(`====================================================`);
-  });
-
-  process.on('SIGINT', () => {
-    console.log('\nGracefully shutting down Locari Agent Finder...');
-    server.close(() => {
-      process.exit(0);
+  function startListening(portToTry) {
+    const server = app.listen(portToTry, () => {
+      console.log(`====================================================`);
+      console.log(`  🚀 LOCARI AGENT FINDER ENGINE RUNNING`);
+      console.log(`  Local URL:   http://localhost:${portToTry}`);
+      console.log(`  API Status:  http://localhost:${portToTry}/health`);
+      console.log(`  Database:    Active (SQLite WAL mode)`);
+      console.log(`====================================================`);
     });
-  });
+
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE' && !process.env.PORT) {
+        console.warn(`⚠️ Port ${portToTry} is already in use. Automatically binding to port ${Number(portToTry) + 1}...`);
+        startListening(Number(portToTry) + 1);
+      } else {
+        console.error('Server error:', err.message);
+        process.exit(1);
+      }
+    });
+
+    process.on('SIGINT', () => {
+      console.log('\nGracefully shutting down Locari Agent Finder...');
+      server.close(() => {
+        process.exit(0);
+      });
+    });
+  }
+
+  startListening(PORT);
 }
 
 module.exports = app;
