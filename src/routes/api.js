@@ -19,6 +19,7 @@ const {
   scrapeFacebookGroup,
   scrapeFacebookGroupBatch,
   scrapePropertyPortal,
+  sanitizeFacebookGroupUrl,
   getActiveScrapeStatus,
   stopScrapeJob
 } = require('../services/facebookScraper.js');
@@ -940,10 +941,11 @@ router.post('/scraper/start-group', (req, res) => {
       sourceId = null
     } = req.body;
 
-    if (!groupUrl || !groupUrl.includes('facebook.com')) {
+    const cleanUrl = sanitizeFacebookGroupUrl(groupUrl);
+    if (!cleanUrl) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide a valid Facebook group URL (e.g. https://www.facebook.com/groups/...)'
+        error: `Please provide a valid Facebook group URL (e.g. https://www.facebook.com/groups/... or https://web.facebook.com/share/g/...)`
       });
     }
 
@@ -955,8 +957,8 @@ router.post('/scraper/start-group', (req, res) => {
       });
     }
 
-    // Run scraper asynchronously in background
-    scrapeFacebookGroup(groupUrl.trim(), {
+    // Run scraper asynchronously in background with clean sanitized URL
+    scrapeFacebookGroup(cleanUrl, {
       maxPosts: parseInt(maxPosts, 10) || 25,
       maxScrolls: parseInt(maxScrolls, 10) || 10,
       headless: Boolean(headless),
@@ -969,7 +971,7 @@ router.post('/scraper/start-group', (req, res) => {
       success: true,
       message: 'Automated Facebook group scrape initiated.',
       data: {
-        groupUrl,
+        groupUrl: cleanUrl,
         maxPosts,
         headless
       }
@@ -998,12 +1000,17 @@ router.post('/scraper/start-batch', (req, res) => {
       return res.status(400).json({ success: false, error: 'Please provide a list of group URLs' });
     }
 
+    const cleanedUrls = groupUrls.map(u => sanitizeFacebookGroupUrl(u)).filter(Boolean);
+    if (cleanedUrls.length === 0) {
+      return res.status(400).json({ success: false, error: 'None of the provided URLs are valid Facebook group links.' });
+    }
+
     const currentJob = getActiveScrapeStatus();
     if (currentJob.running) {
       return res.status(400).json({ success: false, error: 'A scrape job is already currently running.' });
     }
 
-    scrapeFacebookGroupBatch(groupUrls, {
+    scrapeFacebookGroupBatch(cleanedUrls, {
       maxPosts: parseInt(maxPosts, 10) || 25,
       maxScrolls: parseInt(maxScrolls, 10) || 8,
       headless: Boolean(headless)
@@ -1011,7 +1018,7 @@ router.post('/scraper/start-batch', (req, res) => {
       console.error('Batch scrape failed:', err);
     });
 
-    res.json({ success: true, message: `Batch scrape across ${groupUrls.length} groups started.` });
+    res.json({ success: true, message: `Batch scrape across ${cleanedUrls.length} groups started.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

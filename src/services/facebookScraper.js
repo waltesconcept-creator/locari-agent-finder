@@ -273,6 +273,47 @@ async function scanUserJoinedGroups(options = {}) {
 }
 
 /**
+ * Intelligent Facebook URL Sanitizer
+ * Automatically strips accidental text prefixes, duplicate protocols (e.g. https://wehttps://...),
+ * and extracts the clean Facebook group or share link.
+ */
+function sanitizeFacebookGroupUrl(input) {
+  if (!input) return null;
+  let str = String(input).trim();
+
+  // 1. Recover from accidental multi-paste or nested protocol
+  const embeddedProtocol = str.match(/https?:\/\/[a-z0-9._-]*?(https?:\/\/[^\s"']+)/i);
+  if (embeddedProtocol) {
+    str = embeddedProtocol[1];
+  }
+
+  // 2. Extract clean Facebook Share Link (e.g. https://www.facebook.com/share/g/1HZ7NoRtjM/)
+  const shareMatch = str.match(/https?:\/\/(?:[a-zA-Z0-9-]+\.)*facebook\.com\/share\/g\/([a-zA-Z0-9_-]+)/i);
+  if (shareMatch) {
+    return `https://www.facebook.com/share/g/${shareMatch[1]}/`;
+  }
+
+  // 3. Extract clean Facebook Group Link (e.g. https://www.facebook.com/groups/320272456356519/)
+  const groupMatch = str.match(/https?:\/\/(?:[a-zA-Z0-9-]+\.)*facebook\.com\/groups\/([a-zA-Z0-9._-]+)/i);
+  if (groupMatch) {
+    const groupId = groupMatch[1];
+    if (groupId !== 'joins' && groupId !== 'feed' && groupId !== 'discover') {
+      return `https://www.facebook.com/groups/${groupId}/`;
+    }
+  }
+
+  // 4. Fallback: if valid URL on facebook.com
+  try {
+    const u = new URL(str);
+    if (u.hostname.includes('facebook.com')) {
+      return str;
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+/**
  * Automates scraping a Facebook Group (supports standard URLs and /share/g/ links)
  */
 async function scrapeFacebookGroup(groupUrl, options = {}) {
@@ -287,9 +328,14 @@ async function scrapeFacebookGroup(groupUrl, options = {}) {
     throw new Error(`Google Chrome executable not found at ${CHROME_PATH}`);
   }
 
+  const cleanUrl = sanitizeFacebookGroupUrl(groupUrl);
+  if (!cleanUrl) {
+    throw new Error(`Invalid Facebook group URL: "${groupUrl}". Expected a valid Facebook group link.`);
+  }
+
   activeScrapeJob = {
     running: true,
-    targetUrl: groupUrl,
+    targetUrl: cleanUrl,
     sourceType: 'Facebook Group',
     postsFound: 0,
     phonesFound: 0,
@@ -299,7 +345,7 @@ async function scrapeFacebookGroup(groupUrl, options = {}) {
   };
 
   const isHeadless = (headless === 'headless' || headless === true);
-  appendScrapeLog(`Starting scraper for: ${groupUrl}`);
+  appendScrapeLog(`Starting scraper for: ${cleanUrl}`);
   appendScrapeLog(`Settings: Max Posts=${maxPosts}, Max Scrolls=${maxScrolls}, Mode=${isHeadless ? 'Background (Silent)' : 'Visible Window'}`);
 
   let browser = null;
@@ -337,8 +383,16 @@ async function scrapeFacebookGroup(groupUrl, options = {}) {
       appendScrapeLog('Scraping in public visitor mode (no session cookies attached).');
     }
 
-    appendScrapeLog('Navigating to group feed...');
-    await page.goto(groupUrl, { waitUntil: 'domcontentloaded', timeout: 50000 });
+    appendScrapeLog(`Navigating to group feed: ${cleanUrl}...`);
+    try {
+      await page.goto(cleanUrl, { waitUntil: 'domcontentloaded', timeout: 50000 });
+    } catch (navErr) {
+      if (navErr.message.includes('ERR_NAME_NOT_RESOLVED') || navErr.message.includes('ERR_CONNECTION_TIMED_OUT')) {
+        appendScrapeLog(`❌ Connection Error: Could not reach "${cleanUrl}". Please check your internet connection or verify the group link.`);
+        throw new Error(`Failed to reach Facebook URL "${cleanUrl}": ${navErr.message}`);
+      }
+      throw navErr;
+    }
 
     // Allow time for redirect
     await new Promise(r => setTimeout(r, 4000));
@@ -759,6 +813,7 @@ module.exports = {
   scrapeFacebookGroup,
   scrapeFacebookGroupBatch,
   scrapePropertyPortal,
+  sanitizeFacebookGroupUrl,
   getActiveScrapeStatus,
   stopScrapeJob,
   appendScrapeLog,

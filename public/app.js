@@ -944,10 +944,71 @@ function escapeHtml(str) {
 // ==========================================
 let scraperPollInterval = null;
 
+/**
+ * Intelligent Facebook URL Sanitizer
+ * Automatically strips accidental text prefixes, duplicate protocols (e.g. https://wehttps://...),
+ * and extracts the clean Facebook group or share link.
+ */
+function sanitizeFacebookGroupUrl(input) {
+  if (!input) return '';
+  let str = String(input).trim();
+
+  // 1. Recover from accidental multi-paste or nested protocol (e.g. https://wehttps://web.facebook.com...)
+  const embeddedProtocol = str.match(/https?:\/\/[a-z0-9._-]*?(https?:\/\/[^\s"']+)/i);
+  if (embeddedProtocol) {
+    str = embeddedProtocol[1];
+  }
+
+  // 2. Extract clean Facebook Share Link (e.g. https://www.facebook.com/share/g/1HZ7NoRtjM/)
+  const shareMatch = str.match(/https?:\/\/(?:[a-zA-Z0-9-]+\.)*facebook\.com\/share\/g\/([a-zA-Z0-9_-]+)/i);
+  if (shareMatch) {
+    return `https://www.facebook.com/share/g/${shareMatch[1]}/`;
+  }
+
+  // 3. Extract clean Facebook Group Link (e.g. https://www.facebook.com/groups/320272456356519/)
+  const groupMatch = str.match(/https?:\/\/(?:[a-zA-Z0-9-]+\.)*facebook\.com\/groups\/([a-zA-Z0-9._-]+)/i);
+  if (groupMatch) {
+    const groupId = groupMatch[1];
+    if (groupId !== 'joins' && groupId !== 'feed' && groupId !== 'discover') {
+      return `https://www.facebook.com/groups/${groupId}/`;
+    }
+  }
+
+  // 4. Fallback: if valid URL on facebook.com
+  try {
+    const u = new URL(str);
+    if (u.hostname.includes('facebook.com')) {
+      return str;
+    }
+  } catch (_) {}
+
+  return str;
+}
+
+function autoCleanScraperGroupUrl(el) {
+  if (!el || !el.value) return;
+  const raw = el.value.trim();
+  if (raw.includes('facebook.com')) {
+    const cleaned = sanitizeFacebookGroupUrl(raw);
+    if (cleaned && cleaned !== raw) {
+      el.value = cleaned;
+    }
+  }
+}
+
+function clearGroupUrl() {
+  const input = document.getElementById('scraper-group-url');
+  if (input) {
+    input.value = '';
+    input.focus();
+    showToast('Group URL cleared');
+  }
+}
+
 function setGroupUrl(url) {
   const input = document.getElementById('scraper-group-url');
   if (input) {
-    input.value = url;
+    input.value = sanitizeFacebookGroupUrl(url);
     input.classList.add('ring-2', 'ring-blue-500');
     setTimeout(() => input.classList.remove('ring-2', 'ring-blue-500'), 800);
     showToast('Group URL selected!');
@@ -961,28 +1022,94 @@ async function pasteClipboardToGroupUrl() {
       if (text && text.trim()) {
         const input = document.getElementById('scraper-group-url');
         if (input) {
-          input.value = text.trim();
-          showToast('Pasted URL from clipboard!');
+          const cleaned = sanitizeFacebookGroupUrl(text.trim());
+          input.value = cleaned;
+          showToast('Pasted & verified clean Facebook URL!');
           return;
         }
       }
     }
     const input = document.getElementById('scraper-group-url');
     if (input) {
+      input.value = '';
       input.focus();
-      input.select();
       showToast('Press Ctrl+V to paste your group link', 'info');
     }
   } catch (_) {
     const input = document.getElementById('scraper-group-url');
-    if (input) input.focus();
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
     showToast('Press Ctrl+V to paste into the URL field', 'info');
+  }
+}
+
+function sanitizePortalUrl(input) {
+  if (!input) return '';
+  let str = String(input).trim();
+  const embeddedProtocol = str.match(/https?:\/\/[a-z0-9._-]*?(https?:\/\/[^\s"']+)/i);
+  if (embeddedProtocol) {
+    str = embeddedProtocol[1];
+  }
+  return str;
+}
+
+function autoCleanPortalUrl(el) {
+  if (!el || !el.value) return;
+  const raw = el.value.trim();
+  if (raw.includes('propertypro.ng') || raw.includes('nigeriapropertycentre.com')) {
+    const cleaned = sanitizePortalUrl(raw);
+    if (cleaned && cleaned !== raw) {
+      el.value = cleaned;
+    }
+  }
+}
+
+function clearPortalUrl() {
+  const input = document.getElementById('scraper-portal-url');
+  if (input) {
+    input.value = '';
+    input.focus();
+    showToast('Portal URL cleared');
   }
 }
 
 function setPortalUrl(url) {
   const input = document.getElementById('scraper-portal-url');
-  if (input) input.value = url;
+  if (input) {
+    input.value = sanitizePortalUrl(url);
+    showToast('Portal URL selected!');
+  }
+}
+
+async function pasteClipboardToPortalUrl() {
+  try {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) {
+        const input = document.getElementById('scraper-portal-url');
+        if (input) {
+          input.value = sanitizePortalUrl(text.trim());
+          showToast('Pasted portal URL from clipboard!');
+          return;
+        }
+      }
+    }
+    const input = document.getElementById('scraper-portal-url');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    showToast('Press Ctrl+V to paste portal URL', 'info');
+  } catch (_) {
+    const input = document.getElementById('scraper-portal-url');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    showToast('Press Ctrl+V to paste portal URL', 'info');
+  }
 }
 
 async function checkFacebookSessionStatus() {
@@ -1052,13 +1179,20 @@ async function clearFacebookCookiesAction() {
 }
 
 async function startFacebookGroupScrape() {
-  const groupUrl = document.getElementById('scraper-group-url')?.value.trim();
+  const rawGroupUrl = document.getElementById('scraper-group-url')?.value.trim();
   const maxPosts = document.getElementById('scraper-max-posts')?.value || '30';
   const maxScrolls = document.getElementById('scraper-max-scrolls')?.value || '10';
   const browserMode = document.getElementById('scraper-browser-mode')?.value || 'headless';
 
-  if (!groupUrl || !groupUrl.includes('facebook.com')) {
-    showToast('Please enter a valid Facebook Group URL', 'error');
+  const groupUrl = sanitizeFacebookGroupUrl(rawGroupUrl);
+  const inputEl = document.getElementById('scraper-group-url');
+  if (inputEl && groupUrl) {
+    inputEl.value = groupUrl;
+  }
+
+  if (!groupUrl || !groupUrl.includes('facebook.com') || (!groupUrl.includes('/groups/') && !groupUrl.includes('/share/g/'))) {
+    showToast('Please enter a valid Facebook Group URL (e.g. https://www.facebook.com/groups/... or https://web.facebook.com/share/g/...)', 'error');
+    if (inputEl) inputEl.focus();
     return;
   }
 
