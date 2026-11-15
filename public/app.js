@@ -17,6 +17,24 @@ document.addEventListener('DOMContentLoaded', () => {
   checkFacebookSessionStatus();
   fetchLeads(1);
   fetchGroupsForFilter();
+
+  // If in cloud environment, disable visible window option and enforce headless background
+  if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    const opt1 = document.getElementById('opt-visible-window');
+    if (opt1) {
+      opt1.disabled = true;
+      opt1.textContent = 'Visible Window (Localhost Only)';
+    }
+    const opt2 = document.getElementById('opt-portal-visible');
+    if (opt2) {
+      opt2.disabled = true;
+      opt2.textContent = 'Visible Window (Localhost Only)';
+    }
+    const select1 = document.getElementById('scraper-browser-mode');
+    if (select1) select1.value = 'headless';
+    const select2 = document.getElementById('scraper-portal-mode');
+    if (select2) select2.value = 'headless';
+  }
 });
 
 // Toast notification helper

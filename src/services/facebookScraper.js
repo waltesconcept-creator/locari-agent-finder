@@ -409,14 +409,20 @@ async function scrapeFacebookGroup(groupUrl, options = {}) {
     completedSummary: null
   };
 
-  const isHeadless = (headless === 'headless' || headless === true);
+  const hasNoDisplay = process.platform !== 'win32' && !process.env.DISPLAY;
+  let isHeadless = (headless === 'headless' || headless === true);
+  if (hasNoDisplay && !isHeadless) {
+    appendScrapeLog('ℹ️ Notice: Cloud container has no GUI display server. Automatically switching to Silent Background mode.');
+    isHeadless = true;
+  }
+
   appendScrapeLog(`Starting scraper for: ${cleanUrl}`);
   appendScrapeLog(`Settings: Max Posts=${maxPosts}, Max Scrolls=${maxScrolls}, Mode=${isHeadless ? 'Background (Silent)' : 'Visible Window'}`);
 
   let browser = null;
 
   try {
-    browser = await puppeteer.launch({
+    const launchOptions = {
       executablePath: CHROME_PATH,
       headless: isHeadless ? 'new' : false,
       defaultViewport: { width: 1280, height: 900 },
@@ -425,10 +431,24 @@ async function scrapeFacebookGroup(groupUrl, options = {}) {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-notifications',
+        '--disable-gpu',
         '--disable-blink-features=AutomationControlled',
         '--lang=en-US,en'
       ]
-    });
+    };
+
+    try {
+      browser = await puppeteer.launch(launchOptions);
+    } catch (launchErr) {
+      if (!isHeadless && (launchErr.message.includes('Missing X server') || launchErr.message.includes('headful') || launchErr.message.includes('DISPLAY'))) {
+        appendScrapeLog('⚠️ Display server unavailable on cloud host. Falling back to background mode...');
+        launchOptions.headless = 'new';
+        isHeadless = true;
+        browser = await puppeteer.launch(launchOptions);
+      } else {
+        throw launchErr;
+      }
+    }
 
     activeBrowserInstance = browser;
 
@@ -692,19 +712,38 @@ async function scrapePropertyPortal(portalUrl, options = {}) {
     completedSummary: null
   };
 
-  const isHeadless = (headless === 'headless' || headless === true);
+  const hasNoDisplay = process.platform !== 'win32' && !process.env.DISPLAY;
+  let isHeadless = (headless === 'headless' || headless === true);
+  if (hasNoDisplay && !isHeadless) {
+    appendScrapeLog('ℹ️ Notice: Cloud container has no GUI display server. Automatically switching to Silent Background mode.');
+    isHeadless = true;
+  }
+
   appendScrapeLog(`Starting portal scraper for: ${portalUrl}`);
   appendScrapeLog(`Settings: Max Pages=${maxPages}, Mode=${isHeadless ? 'Background (Silent)' : 'Visible Window'}`);
 
   let browser = null;
 
   try {
-    browser = await puppeteer.launch({
+    const launchOptions = {
       executablePath: CHROME_PATH,
       headless: isHeadless ? 'new' : false,
       defaultViewport: { width: 1280, height: 900 },
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-notifications']
-    });
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-notifications', '--disable-gpu']
+    };
+
+    try {
+      browser = await puppeteer.launch(launchOptions);
+    } catch (launchErr) {
+      if (!isHeadless && (launchErr.message.includes('Missing X server') || launchErr.message.includes('headful') || launchErr.message.includes('DISPLAY'))) {
+        appendScrapeLog('⚠️ Display server unavailable on cloud host. Falling back to background mode...');
+        launchOptions.headless = 'new';
+        isHeadless = true;
+        browser = await puppeteer.launch(launchOptions);
+      } else {
+        throw launchErr;
+      }
+    }
 
     activeBrowserInstance = browser;
     const page = await browser.newPage();
