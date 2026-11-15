@@ -28,35 +28,32 @@
         </div>
       </div>
 
-      <!-- Navigation Tabs (Scraper is #1 Primary Default Tab) -->
-      <nav class="hidden md:flex space-x-1 bg-slate-100 p-1 rounded-xl">
-        <button id="nav-scraper" onclick="switchTab('scraper')" class="nav-tab active px-4 py-1.5 rounded-lg text-sm font-medium transition-all">
-          <i data-lucide="bot" class="w-4 h-4 inline mr-1.5 -mt-0.5 text-blue-600"></i>Scrape Facebook Groups
+      <!-- Navigation Tabs (Visible on all screens) -->
+      <nav class="flex flex-wrap items-center gap-1 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+        <button id="nav-scraper" onclick="switchTab('scraper')" class="nav-tab active px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer">
+          <i data-lucide="bot" class="w-4 h-4 inline mr-1 -mt-0.5 text-blue-600"></i>Scrape Facebook
         </button>
-        <button id="nav-agents" onclick="switchTab('agents')" class="nav-tab px-4 py-1.5 rounded-lg text-sm font-medium transition-all">
-          <i data-lucide="users" class="w-4 h-4 inline mr-1.5 -mt-0.5 text-emerald-600"></i>Discovered Agent Leads
+        <button id="nav-portals" onclick="switchTab('portals')" class="nav-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200">
+          <i data-lucide="globe" class="w-4 h-4 inline mr-1 -mt-0.5 text-purple-600"></i>Property Portals (PropertyPro)
         </button>
-        <button id="nav-portals" onclick="switchTab('portals')" class="nav-tab px-4 py-1.5 rounded-lg text-sm font-medium transition-all">
-          <i data-lucide="globe" class="w-4 h-4 inline mr-1.5 -mt-0.5 text-purple-600"></i>Property Portals Scraper
+        <button id="nav-agents" onclick="switchTab('agents')" class="nav-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer">
+          <i data-lucide="users" class="w-4 h-4 inline mr-1 -mt-0.5 text-emerald-600"></i>Discovered Agents
         </button>
-        <button id="nav-dashboard" onclick="switchTab('dashboard')" class="nav-tab px-4 py-1.5 rounded-lg text-sm font-medium transition-all">
-          <i data-lucide="layout-dashboard" class="w-4 h-4 inline mr-1.5 -mt-0.5"></i>Dashboard & Stats
+        <button id="nav-dashboard" onclick="switchTab('dashboard')" class="nav-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer">
+          <i data-lucide="layout-dashboard" class="w-4 h-4 inline mr-1 -mt-0.5"></i>Dashboard
         </button>
-        <button id="nav-outreach" onclick="switchTab('outreach')" class="nav-tab px-4 py-1.5 rounded-lg text-sm font-medium transition-all">
-          <i data-lucide="phone-call" class="w-4 h-4 inline mr-1.5 -mt-0.5"></i>Outreach Pipeline
+        <button id="nav-outreach" onclick="switchTab('outreach')" class="nav-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer">
+          <i data-lucide="phone-call" class="w-4 h-4 inline mr-1 -mt-0.5"></i>Outreach
         </button>
       </nav>
 
       <!-- Quick Action Buttons -->
       <div class="flex items-center space-x-2 text-xs">
-        <button onclick="confirmResetDatabase()" class="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-semibold px-3 py-1.5 rounded-lg flex items-center transition-all text-xs" title="Clear all discovered leads and test records from database">
+        <button onclick="confirmResetDatabase()" class="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-semibold px-3 py-1.5 rounded-lg flex items-center transition-all text-xs cursor-pointer" title="Clear all discovered leads and test records from database">
           <i data-lucide="trash-2" class="w-3.5 h-3.5 mr-1 text-red-600"></i>Clear All Data
         </button>
-        <button onclick="launchFacebookLoginWindow()" class="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold px-3 py-1.5 rounded-lg flex items-center transition-all text-xs">
-          <i data-lucide="log-in" class="w-3.5 h-3.5 mr-1.5"></i>Log In to Facebook
-        </button>
-        <button onclick="switchTab('scraper')" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3.5 py-1.5 rounded-lg shadow-sm flex items-center transition-all text-xs">
-          <i data-lucide="search" class="w-3.5 h-3.5 mr-1.5"></i>Scrape Group
+        <button onclick="switchTab('portals')" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-3 py-1.5 rounded-lg shadow-sm flex items-center transition-all text-xs cursor-pointer">
+          <i data-lucide="globe" class="w-3.5 h-3.5 mr-1.5"></i>Open Portals Scraper
         </button>
       </div>
     </div>
@@ -105,6 +102,49 @@
           <button onclick="scanMyJoinedGroups()" id="btn-scan-groups" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-3 py-1.5 rounded-xl text-xs flex items-center transition-all">
             <i data-lucide="list-filter" class="w-3.5 h-3.5 mr-1.5 text-blue-400"></i>Scan Groups I Follow
           </button>
+        </div>
+      </div>
+
+      <!-- Quick Guidance Banners: Facebook Authentication Warning & Portals Scraper Shortcut -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Banner 1: Facebook Session Info -->
+        <div class="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex flex-col justify-between gap-3 text-amber-950">
+          <div class="flex items-start space-x-3">
+            <div class="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 mt-0.5 font-bold">
+              <i data-lucide="alert-circle" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h4 class="text-xs font-bold text-amber-900">Why does Facebook return 0 results?</h4>
+              <p class="text-[11px] text-amber-800 leading-relaxed mt-0.5">
+                Facebook hides all new group listings from anonymous visitors behind a login wall. To scrape 30–100 posts and extract all newly posted phone numbers, click <strong>Connect Facebook Account</strong> above.
+              </p>
+            </div>
+          </div>
+          <div class="pt-1">
+            <button onclick="launchFacebookLoginWindow()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-xl text-xs shadow transition-all flex items-center justify-center cursor-pointer">
+              <i data-lucide="log-in" class="w-4 h-4 mr-1.5"></i>Connect Facebook Account (Auto-Sync)
+            </button>
+          </div>
+        </div>
+
+        <!-- Banner 2: Property Portals Scraper (Zero-Login Needed) -->
+        <div class="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-2xl flex flex-col justify-between gap-3 text-purple-950">
+          <div class="flex items-start space-x-3">
+            <div class="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 mt-0.5 font-bold shadow-md shadow-purple-600/20">
+              <i data-lucide="globe" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h4 class="text-xs font-bold text-purple-950">Property Portals Scraper (PropertyPro)</h4>
+              <p class="text-[11px] text-purple-800 leading-relaxed mt-0.5">
+                Extract 40+ active Nigerian agent leads with unmasked phone numbers right now directly from PropertyPro Nigeria. <strong>Zero Facebook login required!</strong>
+              </p>
+            </div>
+          </div>
+          <div class="pt-1">
+            <button onclick="switchTab('portals')" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded-xl text-xs shadow-md transition-all flex items-center justify-center cursor-pointer">
+              <i data-lucide="arrow-right" class="w-4 h-4 mr-1.5"></i>Switch to Property Portals Scraper Tab
+            </button>
+          </div>
         </div>
       </div>
 

@@ -1208,6 +1208,15 @@ async function startFacebookGroupScrape() {
     return;
   }
 
+  // Check if Facebook session is connected
+  try {
+    const statusRes = await fetch('/api/scraper/status').then(r => r.json()).catch(() => null);
+    const isConnected = statusRes?.data?.profile?.hasUserSession;
+    if (!isConnected) {
+      showToast('⚠️ Notice: Scraping in Public Mode. If 0 leads are returned, click "Connect Facebook Account" above.', 'info');
+    }
+  } catch (_) {}
+
   try {
     const btn = document.getElementById('btn-start-fb-scrape');
     if (btn) {

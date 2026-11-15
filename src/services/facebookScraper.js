@@ -444,7 +444,8 @@ async function scrapeFacebookGroup(groupUrl, options = {}) {
         appendScrapeLog(`Note on cookies: ${cErr.message}`);
       }
     } else {
-      appendScrapeLog('Scraping in public visitor mode (no session cookies attached).');
+      appendScrapeLog('⚠️ Scraping in public visitor mode (no session cookies attached).');
+      appendScrapeLog('💡 Note: Facebook restricts post feeds for anonymous visitors. If 0 posts are returned, click "Connect Facebook Account" in the top bar.');
     }
 
     appendScrapeLog(`Navigating to group feed: ${cleanUrl}...`);
@@ -584,6 +585,11 @@ async function scrapeFacebookGroup(groupUrl, options = {}) {
     appendScrapeLog(`- New agents discovered: ${ingestSummary.agentsCreated}`);
     appendScrapeLog(`- Existing agents updated: ${ingestSummary.agentsUpdated}`);
     appendScrapeLog(`- Duplicates merged: ${ingestSummary.duplicatesDetected}`);
+
+    if (ingestSummary.postsImported === 0 && (!savedCookies || savedCookies.length === 0)) {
+      appendScrapeLog('💡 Tip: Facebook served 0 regular listings because no Facebook account is connected.');
+      appendScrapeLog('👉 Click "Connect Facebook Account" in the top bar to log in, or use the "Property Portals Scraper" tab for instant verified agent leads!');
+    }
 
     activeScrapeJob.running = false;
     activeScrapeJob.completedSummary = {
