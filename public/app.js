@@ -1130,13 +1130,25 @@ async function checkFacebookSessionStatus() {
   } catch (_) {}
 }
 
-function launchFacebookLoginWindow() {
+async function launchFacebookLoginWindow() {
   try {
-    window.open('https://www.facebook.com', '_blank');
-    showToast('Facebook opened in a new tab! Log in to your account.', 'info');
-    fetch('/api/scraper/launch-login', { method: 'POST' }).catch(() => {});
+    showToast('🚀 Launching Chrome login window... Please log into Facebook.', 'info');
+    const res = await fetch('/api/scraper/launch-login', { method: 'POST' }).then(r => r.json());
+    if (res.success) {
+      startScraperPolling();
+      // Poll session status periodically to detect when user logs in
+      const pollTimer = setInterval(async () => {
+        await checkFacebookSessionStatus();
+        const badge = document.getElementById('fb-session-badge');
+        if (badge && badge.textContent.includes('Connected')) {
+          clearInterval(pollTimer);
+          showToast('🎉 Facebook account connected! You can now scrape any group with full access.');
+        }
+      }, 3000);
+      setTimeout(() => clearInterval(pollTimer), 180000);
+    }
   } catch (err) {
-    window.open('https://www.facebook.com', '_blank');
+    showToast('Error opening login window: ' + err.message, 'error');
   }
 }
 

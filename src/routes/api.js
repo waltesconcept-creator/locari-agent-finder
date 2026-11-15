@@ -896,11 +896,16 @@ router.get('/scraper/status', (req, res) => {
   }
 });
 
-// Launch visible Chrome for user to log into Facebook once
+// Launch visible Chrome for user to log into Facebook once and auto-save session
 router.post('/scraper/launch-login', (req, res) => {
   try {
-    const result = launchLoginBrowser();
-    res.json({ success: true, data: result });
+    launchLoginBrowser().catch(err => {
+      console.error('Interactive login error:', err);
+    });
+    res.json({
+      success: true,
+      message: 'Interactive Chrome login window opened. Please log into Facebook in the opened window.'
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

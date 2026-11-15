@@ -91,9 +91,9 @@
             <span id="fb-session-status-text">Public Mode (Ready)</span>
           </div>
 
-          <!-- Log In to Facebook Button -->
-          <button onclick="launchFacebookLoginWindow()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3.5 py-1.5 rounded-xl text-xs flex items-center shadow-md transition-all">
-            <i data-lucide="external-link" class="w-3.5 h-3.5 mr-1.5"></i>Log In to Facebook
+          <!-- Connect Facebook Account Button -->
+          <button onclick="launchFacebookLoginWindow()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3.5 py-1.5 rounded-xl text-xs flex items-center shadow-md transition-all cursor-pointer">
+            <i data-lucide="log-in" class="w-3.5 h-3.5 mr-1.5"></i>Connect Facebook Account (Auto-Sync)
           </button>
 
           <!-- Connect Session / Cookie Button -->
@@ -747,12 +747,16 @@
         </button>
       </div>
 
-      <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
-        <p class="font-bold flex items-center"><i data-lucide="info" class="w-3.5 h-3.5 mr-1 text-blue-600"></i>Public vs Private Groups:</p>
+      <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-2">
+        <p class="font-bold flex items-center"><i data-lucide="shield-check" class="w-3.5 h-3.5 mr-1 text-amber-600"></i>Why connect your Facebook account?</p>
         <p class="text-[11px] leading-relaxed">
-          • <strong>Public Groups</strong> can be scraped directly without logging in.<br>
-          • <strong>Closed or Private Groups</strong> you have joined require session cookies so the scraper can see posts.
+          Facebook limits anonymous guest visitors to only 1 pinned post before showing a login barrier. When connected, your scraper unlocks the entire real-time feed with all newly posted property listings, agent phone numbers, and full discussion posts.
         </p>
+        <div>
+          <button type="button" onclick="launchFacebookLoginWindow(); closeModal('facebookSessionModal');" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center shadow cursor-pointer">
+            <i data-lucide="log-in" class="w-3.5 h-3.5 mr-1.5"></i>Launch 1-Click Interactive Login Window
+          </button>
+        </div>
       </div>
 
       <div>

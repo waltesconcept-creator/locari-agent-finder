@@ -175,19 +175,83 @@ function checkProfileStatus() {
 }
 
 /**
- * Opens Facebook in the user's interactive Windows desktop browser immediately
+ * Launches an interactive Chrome window for Facebook login,
+ * monitors for c_user session cookie, and saves it automatically when logged in.
  */
-function launchLoginBrowser() {
-  appendScrapeLog('Opening Facebook in your interactive desktop browser...');
-  try {
-    exec('cmd.exe /c start https://www.facebook.com');
-  } catch (err) {
-    appendScrapeLog(`Error opening browser: ${err.message}`);
+async function launchLoginBrowser() {
+  if (!fs.existsSync(CHROME_PATH)) {
+    throw new Error(`Google Chrome executable not found at ${CHROME_PATH}`);
   }
-  return {
-    success: true,
-    message: 'Facebook opened in your desktop browser. Log into your account and you are ready.'
-  };
+
+  appendScrapeLog('Launching interactive Chrome window for Facebook login...');
+
+  let browser = null;
+  try {
+    browser = await puppeteer.launch({
+      executablePath: CHROME_PATH,
+      headless: false,
+      defaultViewport: null,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-notifications',
+        '--start-maximized'
+      ]
+    });
+
+    const pages = await browser.pages();
+    const page = pages.length > 0 ? pages[0] : await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+
+    // Inject any existing cookies
+    const existing = loadFacebookCookies();
+    if (existing && existing.length > 0) {
+      await page.setCookie(...existing).catch(() => {});
+    }
+
+    await page.goto('https://www.facebook.com/login', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    appendScrapeLog('Facebook login window opened. Please log into your Facebook account in the opened window.');
+    appendScrapeLog('Waiting for login... (The window will automatically save your session and close when logged in)');
+
+    // Poll for c_user cookie up to 5 minutes
+    const maxWaitMs = 300000;
+    const pollInterval = 2500;
+    let elapsed = 0;
+
+    return new Promise((resolve) => {
+      const timer = setInterval(async () => {
+        elapsed += pollInterval;
+        try {
+          const cookies = await page.cookies();
+          const userCookie = cookies.find(c => c.name === 'c_user');
+          if (userCookie) {
+            clearInterval(timer);
+            saveFacebookCookies(cookies);
+            appendScrapeLog(`🎉 Facebook login detected! User ID: ${userCookie.value}. Saved ${cookies.length} session cookies.`);
+            appendScrapeLog('You are now connected! All future group scrapes will run with your full authenticated member access.');
+            setTimeout(async () => {
+              try { await browser.close(); } catch (_) {}
+            }, 2000);
+            resolve({ success: true, userId: userCookie.value, cookiesCount: cookies.length });
+          } else if (elapsed >= maxWaitMs) {
+            clearInterval(timer);
+            appendScrapeLog('Login window timed out after 5 minutes.');
+            try { await browser.close(); } catch (_) {}
+            resolve({ success: false, error: 'Login timed out after 5 minutes.' });
+          }
+        } catch (pollErr) {
+          clearInterval(timer);
+          appendScrapeLog('Login window was closed.');
+          resolve({ success: false, error: 'Browser closed.' });
+        }
+      }, pollInterval);
+    });
+
+  } catch (err) {
+    appendScrapeLog(`Error launching login browser: ${err.message}`);
+    if (browser) await browser.close().catch(() => {});
+    throw err;
+  }
 }
 
 /**
