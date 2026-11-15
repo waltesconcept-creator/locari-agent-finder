@@ -4,8 +4,10 @@
 
 let currentTab = 'scraper';
 let currentAgentsPage = 1;
+let currentLeadsPage = 1;
 let currentAgentDetailId = null;
 let searchDebounceTimer = null;
+let leadSearchDebounceTimer = null;
 
 // Initialize app on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -13,6 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchDashboardStats();
   fetchFollowups();
   checkFacebookSessionStatus();
+  fetchLeads(1);
+  fetchGroupsForFilter();
 });
 
 // Toast notification helper
@@ -45,7 +49,10 @@ function switchTab(tabName) {
   if (pane) pane.classList.remove('hidden');
 
   if (tabName === 'scraper') fetchQuickScraperResults();
-  if (tabName === 'agents') fetchAgents(currentAgentsPage);
+  if (tabName === 'agents') {
+    fetchLeads(currentLeadsPage);
+    fetchGroupsForFilter();
+  }
   if (tabName === 'dashboard') fetchDashboardStats();
   if (tabName === 'outreach') fetchFollowups();
 
@@ -199,6 +206,379 @@ async function fetchDashboardStats() {
     lucide.createIcons();
   } catch (err) {
     console.error('Failed to load stats:', err);
+  }
+}
+
+// ==========================================
+// LEADS CRM & DIRECTORY
+// ==========================================
+function debounceLeadSearch() {
+  clearTimeout(leadSearchDebounceTimer);
+  leadSearchDebounceTimer = setTimeout(() => {
+    fetchLeads(1);
+  }, 250);
+}
+
+async function fetchGroupsForFilter() {
+  try {
+    const res = await fetch('/api/groups').then(r => r.json());
+    if (!res.success) return;
+    const select = document.getElementById('lead-filter-group');
+    if (!select) return;
+
+    const currentVal = select.value;
+    select.innerHTML = '<option value="">All Groups</option>' + res.data.map(g => `
+      <option value="${g.id}">${escapeHtml(g.name || g.url)} (${g.current_leads_count || 0})</option>
+    `).join('');
+    if (currentVal) select.value = currentVal;
+  } catch (err) {
+    console.error('Error fetching groups:', err);
+  }
+}
+
+async function fetchLeads(page = 1) {
+  try {
+    currentLeadsPage = page;
+    const search = document.getElementById('lead-search-input')?.value || '';
+    const groupId = document.getElementById('lead-filter-group')?.value || '';
+    const status = document.getElementById('lead-filter-status')?.value || '';
+    const hasPhone = document.getElementById('lead-filter-has-phone')?.checked || false;
+    const hasWhatsApp = document.getElementById('lead-filter-has-wa')?.checked || false;
+    const hasEmail = document.getElementById('lead-filter-has-email')?.checked || false;
+
+    const params = new URLSearchParams({
+      search,
+      groupId,
+      status,
+      hasPhone,
+      hasWhatsApp,
+      hasEmail,
+      page,
+      limit: 15
+    });
+
+    const res = await fetch(`/api/leads?${params}`).then(r => r.json());
+    if (!res.success) return;
+
+    const { data: leads, pagination } = res;
+    const tbody = document.getElementById('leads-table-body');
+    if (!tbody) return;
+
+    if (leads.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" class="px-4 py-8 text-center text-slate-400">
+            No leads match your search criteria. Paste posts in Direct Ingest or scrape a group above!
+          </td>
+        </tr>
+      `;
+      document.getElementById('lead-pagination-info').textContent = 'Showing 0 of 0 leads';
+      document.getElementById('lead-pagination-controls').innerHTML = '';
+      return;
+    }
+
+    tbody.innerHTML = leads.map(l => {
+      const waUrl = l.formattedWhatsApp || (l.phoneNumber ? `https://wa.me/${l.phoneNumber.replace(/[^\d]/g, '')}` : null);
+      return `
+        <tr class="hover:bg-slate-50 transition-colors">
+          <td class="px-4 py-3">
+            <div class="font-bold text-slate-900 flex items-center">
+              <span class="w-2 h-2 rounded-full ${l.status === 'Closed' ? 'bg-slate-400' : (l.status === 'Contacted' ? 'bg-blue-500' : 'bg-emerald-500')} mr-2"></span>
+              ${escapeHtml(l.agentName || 'Verified Agent')}
+            </div>
+          </td>
+          <td class="px-4 py-3 font-mono text-xs">
+            ${l.phoneNumber ? `
+              <div class="flex items-center space-x-1.5">
+                <span class="text-slate-800 font-semibold">${escapeHtml(l.phoneNumber)}</span>
+                <a href="tel:${l.phoneNumber}" class="text-slate-400 hover:text-blue-600" title="Call">
+                  <i data-lucide="phone" class="w-3.5 h-3.5"></i>
+                </a>
+              </div>
+            ` : '<span class="text-slate-400 italic">None</span>'}
+          </td>
+          <td class="px-4 py-3">
+            ${waUrl ? `
+              <a href="${waUrl}" target="_blank" class="inline-flex items-center px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 font-semibold text-xs shadow-sm transition-all" title="Open WhatsApp chat">
+                <i data-lucide="message-circle" class="w-3.5 h-3.5 mr-1 text-emerald-600"></i>Chat on WhatsApp
+              </a>
+            ` : '<span class="text-slate-400 text-xs italic">No WhatsApp</span>'}
+          </td>
+          <td class="px-4 py-3 text-xs">
+            ${l.email ? `
+              <a href="mailto:${l.email}" class="text-blue-600 hover:underline flex items-center">
+                <i data-lucide="mail" class="w-3.5 h-3.5 mr-1 text-slate-400"></i>${escapeHtml(l.email)}
+              </a>
+            ` : '<span class="text-slate-400 italic">None</span>'}
+          </td>
+          <td class="px-4 py-3 text-xs text-slate-600">
+            <span class="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-700 truncate max-w-[140px]" title="${escapeHtml(l.groupName || l.groupUrl || 'Facebook Group')}">
+              ${escapeHtml(l.groupName || 'Facebook Group')}
+            </span>
+          </td>
+          <td class="px-4 py-3 text-xs text-slate-600 max-w-xs">
+            <div class="line-clamp-2" title="${escapeHtml(l.postSnippet || '')}">
+              ${escapeHtml(l.postSnippet || '—')}
+            </div>
+          </td>
+          <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+            ${formatDate(l.scrapedAt)}
+          </td>
+          <td class="px-4 py-3 text-center">
+            <select onchange="updateLeadStatus('${l.id}', this.value)" class="text-xs font-semibold px-2 py-1 rounded-lg border ${l.status === 'Closed' ? 'border-slate-300 text-slate-600 bg-slate-50' : (l.status === 'Contacted' ? 'border-blue-300 text-blue-800 bg-blue-50' : 'border-emerald-300 text-emerald-800 bg-emerald-50')} focus:outline-none cursor-pointer">
+              <option value="New" ${l.status === 'New' ? 'selected' : ''}>New</option>
+              <option value="Contacted" ${l.status === 'Contacted' ? 'selected' : ''}>Contacted</option>
+              <option value="Closed" ${l.status === 'Closed' ? 'selected' : ''}>Closed</option>
+            </select>
+          </td>
+          <td class="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+            <button onclick='openEditLeadModal(${JSON.stringify(l).replace(/'/g, "&apos;")})' class="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer" title="Edit Lead">
+              <i data-lucide="edit-2" class="w-4 h-4"></i>
+            </button>
+            <button onclick="deleteLeadAction('${l.id}')" class="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 cursor-pointer" title="Delete Lead">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    // Pagination info & controls
+    document.getElementById('lead-pagination-info').textContent = `Showing ${leads.length} of ${pagination.total} leads (Page ${pagination.page} of ${pagination.totalPages || 1})`;
+
+    let paginationHtml = '';
+    if (pagination.page > 1) {
+      paginationHtml += `<button onclick="fetchLeads(${pagination.page - 1})" class="px-2.5 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50 cursor-pointer">&larr; Prev</button>`;
+    }
+    if (pagination.page < pagination.totalPages) {
+      paginationHtml += `<button onclick="fetchLeads(${pagination.page + 1})" class="px-2.5 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50 cursor-pointer">Next &rarr;</button>`;
+    }
+    document.getElementById('lead-pagination-controls').innerHTML = paginationHtml;
+
+    lucide.createIcons();
+  } catch (err) {
+    console.error('Failed to fetch leads:', err);
+  }
+}
+
+async function updateLeadStatus(leadId, newStatus) {
+  try {
+    const res = await fetch(`/api/leads/${leadId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    }).then(r => r.json());
+
+    if (res.success) {
+      showToast(`Lead status updated to ${newStatus}`, 'success');
+      fetchDashboardStats();
+    } else {
+      showToast(`Failed: ${res.error}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+}
+
+async function deleteLeadAction(leadId) {
+  if (!confirm('Are you sure you want to delete this lead?')) return;
+  try {
+    const res = await fetch(`/api/leads/${leadId}`, { method: 'DELETE' }).then(r => r.json());
+    if (res.success) {
+      showToast('Lead deleted successfully.', 'success');
+      fetchLeads(currentLeadsPage);
+      fetchDashboardStats();
+    } else {
+      showToast(`Failed: ${res.error}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+}
+
+function exportLeadsCsv() {
+  const search = document.getElementById('lead-search-input')?.value || '';
+  const groupId = document.getElementById('lead-filter-group')?.value || '';
+  const status = document.getElementById('lead-filter-status')?.value || '';
+  const hasPhone = document.getElementById('lead-filter-has-phone')?.checked || false;
+  const hasWhatsApp = document.getElementById('lead-filter-has-wa')?.checked || false;
+  const hasEmail = document.getElementById('lead-filter-has-email')?.checked || false;
+
+  const params = new URLSearchParams({
+    search,
+    groupId,
+    status,
+    hasPhone,
+    hasWhatsApp,
+    hasEmail
+  });
+
+  showToast('Generating CSV file download...', 'info');
+  window.location.href = `/api/leads/export/csv?${params}`;
+}
+
+function openAddLeadModal() {
+  document.getElementById('lead-modal-title').textContent = 'Add New Lead';
+  document.getElementById('lead-modal-id').value = '';
+  document.getElementById('lead-modal-name').value = '';
+  document.getElementById('lead-modal-phone').value = '';
+  document.getElementById('lead-modal-whatsapp').value = '';
+  document.getElementById('lead-modal-email').value = '';
+  document.getElementById('lead-modal-snippet').value = '';
+  document.getElementById('lead-modal-status').value = 'New';
+  openModal('leadModal');
+}
+
+function openEditLeadModal(lead) {
+  document.getElementById('lead-modal-title').textContent = 'Edit Lead';
+  document.getElementById('lead-modal-id').value = lead.id;
+  document.getElementById('lead-modal-name').value = lead.agentName || '';
+  document.getElementById('lead-modal-phone').value = lead.phoneNumber || '';
+  document.getElementById('lead-modal-whatsapp').value = lead.formattedWhatsApp || '';
+  document.getElementById('lead-modal-email').value = lead.email || '';
+  document.getElementById('lead-modal-snippet').value = lead.postSnippet || '';
+  document.getElementById('lead-modal-status').value = lead.status || 'New';
+  openModal('leadModal');
+}
+
+async function submitLeadModalForm() {
+  const id = document.getElementById('lead-modal-id').value;
+  const agentName = document.getElementById('lead-modal-name').value.trim();
+  const phoneNumber = document.getElementById('lead-modal-phone').value.trim();
+  const formattedWhatsApp = document.getElementById('lead-modal-whatsapp').value.trim();
+  const email = document.getElementById('lead-modal-email').value.trim();
+  const postSnippet = document.getElementById('lead-modal-snippet').value.trim();
+  const status = document.getElementById('lead-modal-status').value;
+
+  if (!agentName && !phoneNumber) {
+    showToast('Please provide an agent name or phone number.', 'error');
+    return;
+  }
+
+  const payload = { agentName, phoneNumber, formattedWhatsApp, email, postSnippet, status };
+  try {
+    let res;
+    if (id) {
+      res = await fetch(`/api/leads/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(r => r.json());
+    } else {
+      res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(r => r.json());
+    }
+
+    if (res.success) {
+      showToast(id ? 'Lead updated successfully.' : 'Lead created successfully.', 'success');
+      closeModal('leadModal');
+      fetchLeads(currentLeadsPage);
+      fetchDashboardStats();
+    } else {
+      showToast(`Failed: ${res.error}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+}
+
+// ==========================================
+// DIRECT INGEST (FAIL-SAFE FALLBACK)
+// ==========================================
+function clearRawIngest() {
+  document.getElementById('raw-ingest-content').value = '';
+  document.getElementById('raw-ingest-results-card').classList.add('hidden');
+}
+
+async function pasteClipboardToRawIngest() {
+  try {
+    const text = await navigator.clipboard.readText();
+    document.getElementById('raw-ingest-content').value = text;
+    showToast('Pasted content from clipboard.', 'info');
+  } catch (err) {
+    showToast('Please use Ctrl+V to paste.', 'info');
+  }
+}
+
+async function submitRawIngest() {
+  const rawContent = document.getElementById('raw-ingest-content').value.trim();
+  const groupName = document.getElementById('raw-ingest-group-name').value.trim();
+  const groupUrl = document.getElementById('raw-ingest-group-url').value.trim();
+
+  if (!rawContent) {
+    showToast('Please paste raw post text or HTML first.', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit-raw-ingest');
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Parsing Contacts & Saving...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/ingest/raw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rawContent, groupName, groupUrl })
+    }).then(r => r.json());
+
+    if (!res.success) {
+      showToast(`Ingestion error: ${res.error}`, 'error');
+      return;
+    }
+
+    const { leadsCreated, leads } = res.data;
+    showToast(`Extracted ${leadsCreated} agent leads successfully!`, 'success');
+
+    const card = document.getElementById('raw-ingest-results-card');
+    const summaryText = document.getElementById('raw-ingest-summary-text');
+    const tbody = document.getElementById('raw-ingest-results-body');
+
+    summaryText.textContent = `Extracted and saved ${leadsCreated} contacts to CRM.`;
+    card.classList.remove('hidden');
+
+    if (leads.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="5" class="px-4 py-4 text-center text-slate-400">
+            No phone numbers or contact details were detected in the pasted text.
+          </td>
+        </tr>
+      `;
+    } else {
+      tbody.innerHTML = leads.map(l => {
+        const waUrl = l.formattedWhatsApp || (l.phoneNumber ? `https://wa.me/${l.phoneNumber.replace(/[^\d]/g, '')}` : null);
+        return `
+          <tr class="hover:bg-slate-50 text-xs">
+            <td class="px-4 py-2.5 font-bold text-slate-900">${escapeHtml(l.agentName || 'Verified Agent')}</td>
+            <td class="px-4 py-2.5 font-mono text-emerald-700 font-semibold">${escapeHtml(l.phoneNumber || 'None')}</td>
+            <td class="px-4 py-2.5 text-slate-600">${escapeHtml(l.email || 'None')}</td>
+            <td class="px-4 py-2.5 text-slate-500 max-w-xs truncate">${escapeHtml(l.postSnippet || '')}</td>
+            <td class="px-4 py-2.5 text-right">
+              ${waUrl ? `
+                <a href="${waUrl}" target="_blank" class="inline-flex items-center px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] shadow">
+                  <i data-lucide="message-circle" class="w-3 h-3 mr-1"></i>Chat on WhatsApp
+                </a>
+              ` : '<span class="text-slate-400 italic">No WhatsApp</span>'}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    lucide.createIcons();
+    fetchLeads(1);
+    fetchDashboardStats();
+    fetchGroupsForFilter();
+
+  } catch (err) {
+    showToast(`Failed: ${err.message}`, 'error');
+  } finally {
+    btn.innerHTML = originalText;
+    btn.disabled = false;
   }
 }
 
@@ -1132,11 +1512,17 @@ async function checkFacebookSessionStatus() {
 
 async function launchFacebookLoginWindow() {
   try {
+    // If running in cloud / remote container (e.g. Render), open session cookies modal directly
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      openModal('facebookSessionModal');
+      showToast('Cloud environment: Please paste your Facebook session cookies (c_user & xs) below.', 'info');
+      return;
+    }
+
     showToast('🚀 Launching Chrome login window... Please log into Facebook.', 'info');
     const res = await fetch('/api/scraper/launch-login', { method: 'POST' }).then(r => r.json());
     if (res.success) {
       startScraperPolling();
-      // Poll session status periodically to detect when user logs in
       const pollTimer = setInterval(async () => {
         await checkFacebookSessionStatus();
         const badge = document.getElementById('fb-session-badge');
@@ -1146,9 +1532,13 @@ async function launchFacebookLoginWindow() {
         }
       }, 3000);
       setTimeout(() => clearInterval(pollTimer), 180000);
+    } else {
+      openModal('facebookSessionModal');
+      showToast(res.error || 'Please provide Facebook cookies below.', 'info');
     }
   } catch (err) {
-    showToast('Error opening login window: ' + err.message, 'error');
+    openModal('facebookSessionModal');
+    showToast('Please provide Facebook cookies below.', 'info');
   }
 }
 

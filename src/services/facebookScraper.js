@@ -10,7 +10,8 @@ const fs = require('node:fs');
 const { exec } = require('node:child_process');
 const { ingestBatch } = require('./ingestionService.js');
 const { extractPhones } = require('../nlp/phoneParser.js');
-const { db } = require('../db.js');
+const { db, upsertGroup, insertLead } = require('../db.js');
+const { parsePost, formatWhatsAppUrl, extractContacts } = require('../nlp/contactExtractor.js');
 
 function getChromeExecutablePath() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
@@ -557,6 +558,13 @@ async function scrapeFacebookGroup(groupUrl, options = {}) {
     const allPosts = Array.from(collectedRawPosts.values());
     appendScrapeLog(`Extraction complete. Total unique posts collected: ${allPosts.length}`);
 
+    // Register Facebook Group in groups table
+    const groupRecord = upsertGroup({
+      name: cleanUrl,
+      url: cleanUrl,
+      last_scraped_at: new Date().toISOString()
+    });
+
     // Ingest into database
     appendScrapeLog('Parsing agent details, Nigerian phone numbers, property listings & scoring leads...');
 
@@ -580,7 +588,31 @@ async function scrapeFacebookGroup(groupUrl, options = {}) {
       method: 'Facebook-Scraper'
     });
 
+    // Also persist each valid contact directly into leads table
+    let leadsSaved = 0;
+    for (const p of allPosts) {
+      const parsed = parsePost(p.rawText, {
+        agentName: p.posterName,
+        postUrl: p.postUrl || finalUrl,
+        groupId: groupRecord.id
+      });
+      if (parsed.phoneNumber || parsed.email || parsed.formattedWhatsApp) {
+        insertLead({
+          groupId: groupRecord.id,
+          agentName: parsed.agentName,
+          phoneNumber: parsed.phoneNumber,
+          formattedWhatsApp: parsed.formattedWhatsApp,
+          email: parsed.email,
+          postSnippet: parsed.postSnippet,
+          postUrl: parsed.postUrl,
+          status: 'New'
+        });
+        leadsSaved++;
+      }
+    }
+
     appendScrapeLog(`🎉 Scraping & Lead Discovery Finished Successfully!`);
+    appendScrapeLog(`- Group CRM Leads Saved: ${leadsSaved}`);
     appendScrapeLog(`- Listings imported: ${ingestSummary.postsImported}`);
     appendScrapeLog(`- New agents discovered: ${ingestSummary.agentsCreated}`);
     appendScrapeLog(`- Existing agents updated: ${ingestSummary.agentsUpdated}`);
@@ -860,12 +892,37 @@ async function scrapePropertyPortal(portalUrl, options = {}) {
 
     appendScrapeLog(`Extraction finished. Ingesting ${collectedListings.length} listings into database...`);
 
+    const portalGroup = upsertGroup({
+      name: portalUrl.includes('propertypro') ? 'PropertyPro Nigeria Portal' : 'NigeriaPropertyCentre Portal',
+      url: portalUrl,
+      last_scraped_at: new Date().toISOString()
+    });
+
     const summary = ingestBatch(collectedListings, {
       sourceId,
       method: 'Portal-Scraper'
     });
 
+    let portalLeadsSaved = 0;
+    for (const item of collectedListings) {
+      const phone = item.phone || (item.primaryPhone || null);
+      if (phone) {
+        insertLead({
+          groupId: portalGroup.id,
+          agentName: item.agentName || 'Verified Portal Agent',
+          phoneNumber: phone,
+          formattedWhatsApp: formatWhatsAppUrl(phone),
+          email: item.email || null,
+          postSnippet: item.title || item.rawText?.slice(0, 150) || '',
+          postUrl: item.url || portalUrl,
+          status: 'New'
+        });
+        portalLeadsSaved++;
+      }
+    }
+
     appendScrapeLog(`🎉 Portal Lead Discovery Finished Successfully!`);
+    appendScrapeLog(`- Portal CRM Leads Saved: ${portalLeadsSaved}`);
     appendScrapeLog(`- Listings imported: ${summary.postsImported}`);
     appendScrapeLog(`- New agents discovered: ${summary.agentsCreated}`);
     appendScrapeLog(`- Existing agents updated: ${summary.agentsUpdated}`);

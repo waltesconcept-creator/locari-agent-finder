@@ -6,7 +6,24 @@
 
 const express = require('express');
 const router = express.Router();
-const { db, generateId } = require('../db.js');
+const {
+  db,
+  generateId,
+  insertLead,
+  getLeads,
+  updateLead,
+  deleteLead,
+  upsertGroup,
+  getGroups,
+  getGroup,
+  resetAllData
+} = require('../db.js');
+const {
+  extractContacts,
+  parsePost,
+  formatWhatsAppUrl,
+  stripHtml
+} = require('../nlp/contactExtractor.js');
 const { parseRawPost, previewBatchPaste, ingestBatch, parseCSV, splitMultiplePosts } = require('../services/ingestionService.js');
 const { resolveAndSaveListing, mergeAgents, refreshAgentProfile } = require('../services/deduplicationService.js');
 const {
@@ -1069,13 +1086,269 @@ router.post('/scraper/stop', (req, res) => {
 // Reset / wipe all test and lead records from database
 router.post('/database/reset', (req, res) => {
   try {
-    db.prepare('DELETE FROM advertisements').run();
-    db.prepare('DELETE FROM outreach_logs').run();
-    db.prepare('DELETE FROM import_batches').run();
-    db.prepare('DELETE FROM agents').run();
+    resetAllData();
     res.json({
       success: true,
-      message: 'All test and agent leads successfully wiped from database.'
+      message: 'All test, agent, and lead records successfully wiped from database.'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// 8. LEADS & FACEBOOK GROUPS CRM ENDPOINTS
+// ==========================================
+
+// Get all leads with search, filters, and pagination
+router.get('/leads', (req, res) => {
+  try {
+    const {
+      search = '',
+      groupId = '',
+      hasPhone,
+      hasWhatsApp,
+      hasEmail,
+      status = '',
+      page = 1,
+      limit = 20
+    } = req.query;
+
+    const result = getLeads({
+      search,
+      groupId,
+      hasPhone: hasPhone === 'true' || hasPhone === true,
+      hasWhatsApp: hasWhatsApp === 'true' || hasWhatsApp === true,
+      hasEmail: hasEmail === 'true' || hasEmail === true,
+      status,
+      page,
+      limit
+    });
+
+    res.json({
+      success: true,
+      pagination: result.pagination,
+      data: result.leads
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Create lead manually
+router.post('/leads', (req, res) => {
+  try {
+    const {
+      groupId = null,
+      agentName = 'Verified Agent',
+      phoneNumber = null,
+      formattedWhatsApp = null,
+      email = null,
+      postSnippet = '',
+      postUrl = null,
+      status = 'New'
+    } = req.body;
+
+    if (!agentName && !phoneNumber) {
+      return res.status(400).json({ success: false, error: 'agentName or phoneNumber is required.' });
+    }
+
+    const lead = insertLead({
+      groupId,
+      agentName,
+      phoneNumber,
+      formattedWhatsApp: formattedWhatsApp || (phoneNumber ? formatWhatsAppUrl(phoneNumber) : null),
+      email,
+      postSnippet,
+      postUrl,
+      status: status || 'New'
+    });
+
+    res.status(201).json({ success: true, data: lead });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Update lead (status, contact, details)
+router.put('/leads/:id', (req, res) => {
+  try {
+    const updated = updateLead(req.params.id, req.body);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Lead not found.' });
+    }
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Delete lead
+router.delete('/leads/:id', (req, res) => {
+  try {
+    const ok = deleteLead(req.params.id);
+    if (!ok) {
+      return res.status(404).json({ success: false, error: 'Lead not found.' });
+    }
+    res.json({ success: true, message: 'Lead deleted successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Export Leads as CSV
+router.get('/leads/export/csv', (req, res) => {
+  try {
+    const { search = '', groupId = '', status = '', hasPhone, hasWhatsApp, hasEmail } = req.query;
+    const { leads } = getLeads({
+      search,
+      groupId,
+      status,
+      hasPhone: hasPhone === 'true' || hasPhone === true,
+      hasWhatsApp: hasWhatsApp === 'true' || hasWhatsApp === true,
+      hasEmail: hasEmail === 'true' || hasEmail === true,
+      page: 1,
+      limit: 10000
+    });
+
+    const headers = [
+      'Lead ID', 'Group ID', 'Group Name', 'Agent Name', 'Phone Number',
+      'WhatsApp URL', 'Email', 'Post Snippet', 'Post URL', 'Scraped At', 'Status'
+    ];
+
+    const escapeCsv = (val) => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const csvRows = [headers.join(',')];
+    for (const l of leads) {
+      csvRows.push([
+        escapeCsv(l.id),
+        escapeCsv(l.groupId),
+        escapeCsv(l.groupName || ''),
+        escapeCsv(l.agentName),
+        escapeCsv(l.phoneNumber || ''),
+        escapeCsv(l.formattedWhatsApp || ''),
+        escapeCsv(l.email || ''),
+        escapeCsv(l.postSnippet || ''),
+        escapeCsv(l.postUrl || ''),
+        escapeCsv(l.scrapedAt),
+        escapeCsv(l.status)
+      ].join(','));
+    }
+
+    const csvData = csvRows.join('\r\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="locarie_leads_${Date.now()}.csv"`);
+    res.status(200).send(csvData);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Get Groups list
+router.get('/groups', (req, res) => {
+  try {
+    const groups = getGroups();
+    res.json({ success: true, data: groups });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Upsert Group
+router.post('/groups', (req, res) => {
+  try {
+    const { name, url } = req.body;
+    if (!url) {
+      return res.status(400).json({ success: false, error: 'url is required.' });
+    }
+    const group = upsertGroup({ name, url });
+    res.status(201).json({ success: true, data: group });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// 9. RAW HTML / TEXT DIRECT INGEST (FAIL-SAFE)
+// ==========================================
+router.post('/ingest/raw', (req, res) => {
+  try {
+    const { rawContent, groupUrl, groupName } = req.body;
+    if (!rawContent || typeof rawContent !== 'string') {
+      return res.status(400).json({ success: false, error: 'rawContent (text or HTML) is required.' });
+    }
+
+    // Register or upsert group
+    let group = null;
+    if (groupUrl || groupName) {
+      group = upsertGroup({
+        name: groupName || 'Direct Ingest Group',
+        url: groupUrl || `https://web.facebook.com/groups/direct_ingest_${Date.now()}`,
+        last_scraped_at: new Date().toISOString()
+      });
+    }
+
+    // Split content into posts if multiple posts pasted
+    let rawSegments = [];
+    if (/<article\b|role=["']article["']/i.test(rawContent)) {
+      const parts = rawContent.split(/<article\b|role=["']article["']/i);
+      rawSegments = parts.filter(s => s && s.trim().length > 30);
+    } else {
+      rawSegments = splitMultiplePosts(rawContent);
+    }
+
+    if (rawSegments.length === 0) {
+      rawSegments = [rawContent];
+    }
+
+    const savedLeads = [];
+    for (const segment of rawSegments) {
+      const parsed = parsePost(segment, { groupId: group ? group.id : null });
+      if (parsed.phoneNumber || parsed.email || parsed.formattedWhatsApp) {
+        const lead = insertLead({
+          groupId: group ? group.id : null,
+          agentName: parsed.agentName,
+          phoneNumber: parsed.phoneNumber,
+          formattedWhatsApp: parsed.formattedWhatsApp,
+          email: parsed.email,
+          postSnippet: parsed.postSnippet,
+          postUrl: group ? group.url : null,
+          status: 'New'
+        });
+        savedLeads.push(lead);
+      }
+    }
+
+    // If split did not yield any contact, parse whole content as single block
+    if (savedLeads.length === 0) {
+      const parsed = parsePost(rawContent, { groupId: group ? group.id : null });
+      if (parsed.phoneNumber || parsed.email || parsed.formattedWhatsApp) {
+        const lead = insertLead({
+          groupId: group ? group.id : null,
+          agentName: parsed.agentName,
+          phoneNumber: parsed.phoneNumber,
+          formattedWhatsApp: parsed.formattedWhatsApp,
+          email: parsed.email,
+          postSnippet: parsed.postSnippet,
+          postUrl: group ? group.url : null,
+          status: 'New'
+        });
+        savedLeads.push(lead);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        totalSegments: rawSegments.length,
+        leadsCreated: savedLeads.length,
+        leads: savedLeads,
+        group
+      }
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
