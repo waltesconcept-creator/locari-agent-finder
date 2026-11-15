@@ -1,0 +1,29 @@
+{
+  "name": "locari-agent-finder",
+  "version": "1.0.0",
+  "description": "Locari Property Agent Discovery & Lead Management System for Nigeria",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test tests/*.js"
+  },
+  "keywords": [
+    "locari",
+    "real-estate",
+    "property-agents",
+    "lead-discovery",
+    "nigeria",
+    "crm",
+    "ibadan",
+    "lagos"
+  ],
+  "author": "Locari Team",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "puppeteer-core": "^25.17.0"
+  }
+}

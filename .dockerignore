@@ -1,0 +1,10 @@
+node_modules
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
+data/chrome_profile
+data/facebook_cookies.json
+.git
+.github
+*.log
+tests/inspect_*.js

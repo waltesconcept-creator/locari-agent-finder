@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Locari Agent Finder • Facebook Group Scraper & Lead CRM</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans antialiased">
+
+  <!-- Top Navigation Bar -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white font-bold text-xl shadow-md shadow-emerald-500/20">
+          L
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="font-extrabold text-slate-900 text-lg tracking-tight">LOCARI</span>
+            <span class="text-xs uppercase font-semibold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">Agent Finder</span>
+          </div>
+          <p class="text-xs text-slate-500">Facebook Group Scraper & Agent Discovery • Nigeria</p>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs (Scraper is #1 Primary Default Tab) -->
+      <nav class="hidden md:flex space-x-1 bg-slate-100 p-1 rounded-xl">
+        <button id="nav-scraper" onclick="switchTab('scraper')" class="nav-tab active px-4 py-1.5 rounded-lg text-sm font-medium transition-all">
+          <i data-lucide="bot" class="w-4 h-4 inline mr-1.5 -mt-0.5 text-blue-600"></i>Scrape Facebook Groups
+        </button>
+        <button id="nav-agents" onclick="switchTab('agents')" class="nav-tab px-4 py-1.5 rounded-lg text-sm font-medium transition-all">
+          <i data-lucide="users" class="w-4 h-4 inline mr-1.5 -mt-0.5 text-emerald-600"></i>Discovered Agent Leads
+        </button>
+        <button id="nav-portals" onclick="switchTab('portals')" class="nav-tab px-4 py-1.5 rounded-lg text-sm font-medium transition-all">
+          <i data-lucide="globe" class="w-4 h-4 inline mr-1.5 -mt-0.5 text-purple-600"></i>Property Portals Scraper
+        </button>
+        <button id="nav-dashboard" onclick="switchTab('dashboard')" class="nav-tab px-4 py-1.5 rounded-lg text-sm font-medium transition-all">
+          <i data-lucide="layout-dashboard" class="w-4 h-4 inline mr-1.5 -mt-0.5"></i>Dashboard & Stats
+        </button>
+        <button id="nav-outreach" onclick="switchTab('outreach')" class="nav-tab px-4 py-1.5 rounded-lg text-sm font-medium transition-all">
+          <i data-lucide="phone-call" class="w-4 h-4 inline mr-1.5 -mt-0.5"></i>Outreach Pipeline
+        </button>
+      </nav>
+
+      <!-- Quick Action Buttons -->
+      <div class="flex items-center space-x-2 text-xs">
+        <button onclick="confirmResetDatabase()" class="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-semibold px-3 py-1.5 rounded-lg flex items-center transition-all text-xs" title="Clear all discovered leads and test records from database">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5 mr-1 text-red-600"></i>Clear All Data
+        </button>
+        <button onclick="launchFacebookLoginWindow()" class="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold px-3 py-1.5 rounded-lg flex items-center transition-all text-xs">
+          <i data-lucide="log-in" class="w-3.5 h-3.5 mr-1.5"></i>Log In to Facebook
+        </button>
+        <button onclick="switchTab('scraper')" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3.5 py-1.5 rounded-lg shadow-sm flex items-center transition-all text-xs">
+          <i data-lucide="search" class="w-3.5 h-3.5 mr-1.5"></i>Scrape Group
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- ======================================================== -->
+    <!-- TAB 1 (DEFAULT): AUTOMATED FACEBOOK GROUP SCRAPER        -->
+    <!-- ======================================================== -->
+    <div id="tab-scraper" class="tab-pane space-y-5">
+      
+      <!-- Top Status & Hero Bar -->
+      <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 rounded-2xl shadow-lg border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="space-y-1">
+          <div class="flex items-center space-x-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <h1 class="text-xl font-bold tracking-tight text-white">Facebook Property Group Scraper</h1>
+            <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Engine Ready</span>
+          </div>
+          <p class="text-xs text-slate-300">
+            Discover active Nigerian property agents, extract contact phone numbers (+234), and save leads into your CRM database.
+          </p>
+        </div>
+
+        <!-- Account Session Status & Quick Actions -->
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Session Status Badge -->
+          <div id="fb-session-badge" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/20 border border-amber-500/30 text-amber-300 flex items-center">
+            <span class="w-2 h-2 rounded-full bg-amber-400 mr-2"></span>
+            <span id="fb-session-status-text">Public Mode (Ready)</span>
+          </div>
+
+          <!-- Log In to Facebook Button -->
+          <button onclick="launchFacebookLoginWindow()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3.5 py-1.5 rounded-xl text-xs flex items-center shadow-md transition-all">
+            <i data-lucide="external-link" class="w-3.5 h-3.5 mr-1.5"></i>Log In to Facebook
+          </button>
+
+          <!-- Connect Session / Cookie Button -->
+          <button onclick="openModal('facebookSessionModal')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-3 py-1.5 rounded-xl text-xs flex items-center transition-all">
+            <i data-lucide="key" class="w-3.5 h-3.5 mr-1.5 text-amber-400"></i>Session Settings
+          </button>
+
+          <!-- Scan Groups I Follow Button -->
+          <button onclick="scanMyJoinedGroups()" id="btn-scan-groups" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-3 py-1.5 rounded-xl text-xs flex items-center transition-all">
+            <i data-lucide="list-filter" class="w-3.5 h-3.5 mr-1.5 text-blue-400"></i>Scan Groups I Follow
+          </button>
+        </div>
+      </div>
+
+      <!-- Scanned Groups Container (Shows when user scans their groups) -->
+      <div id="scanned-groups-box" class="hidden bg-white p-5 rounded-2xl border border-blue-200 shadow-md space-y-3">
+        <div class="flex items-center justify-between">
+          <h4 class="text-xs font-bold text-slate-900 flex items-center">
+            <i data-lucide="check-square" class="w-4 h-4 mr-1.5 text-blue-600"></i>Groups Found on Your Facebook Account (Select to scrape):
+          </h4>
+          <div class="space-x-2">
+            <button onclick="selectAllScannedGroups(true)" class="text-[11px] text-blue-600 hover:underline">Select All</button>
+            <button onclick="selectAllScannedGroups(false)" class="text-[11px] text-slate-500 hover:underline">Deselect All</button>
+            <button onclick="scrapeSelectedJoinedGroups()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1 rounded-lg text-xs shadow">
+              Scrape Selected Groups
+            </button>
+          </div>
+        </div>
+        <div id="scanned-groups-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+          <!-- Dynamic checkboxes of user's groups -->
+        </div>
+      </div>
+
+      <!-- Scrape Group Card -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        
+        <!-- Preset Groups -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-slate-700 flex items-center">
+              <i data-lucide="sparkles" class="w-3.5 h-3.5 mr-1.5 text-amber-500"></i>Recommended Nigerian Real Estate Groups (1-Click Fill):
+            </span>
+            <span class="text-[11px] text-slate-400">Click any preset below</span>
+          </div>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <button type="button" onclick="setGroupUrl('https://web.facebook.com/share/g/1R1HwscPr5/')" class="preset-btn px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-medium border border-emerald-200 transition-all flex items-center">
+              <i data-lucide="check-circle" class="w-3.5 h-3.5 mr-1 text-emerald-600"></i>Ibadan Connect (Tested)
+            </button>
+            <button type="button" onclick="setGroupUrl('https://www.facebook.com/groups/ibadanrealestateandapartments')" class="preset-btn px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium border border-blue-200 transition-all flex items-center">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1"></i>Ibadan Real Estate & Houses
+            </button>
+            <button type="button" onclick="setGroupUrl('https://www.facebook.com/groups/housesforrentinibadan')" class="preset-btn px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium border border-blue-200 transition-all flex items-center">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1"></i>Houses For Rent in Ibadan
+            </button>
+            <button type="button" onclick="setGroupUrl('https://www.facebook.com/groups/lagosapartmentsrentals')" class="preset-btn px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium border border-indigo-200 transition-all flex items-center">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1"></i>Lagos Apartments & Flats
+            </button>
+            <button type="button" onclick="setGroupUrl('https://www.facebook.com/groups/lagosmainlandrentals')" class="preset-btn px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium border border-indigo-200 transition-all flex items-center">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1"></i>Yaba, Surulere & Ikeja Rentals
+            </button>
+          </div>
+        </div>
+
+        <!-- URL Input with Paste Helper -->
+        <div>
+          <label class="block text-xs font-bold text-slate-800 mb-1.5">Facebook Group URL</label>
+          <div class="flex gap-2">
+            <div class="relative flex-1">
+              <i data-lucide="link" class="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400"></i>
+              <input 
+                type="text" 
+                id="scraper-group-url" 
+                placeholder="https://web.facebook.com/share/g/... or https://www.facebook.com/groups/..." 
+                class="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none bg-slate-50/50"
+                value="https://web.facebook.com/share/g/1R1HwscPr5/"
+              >
+            </div>
+            <button type="button" onclick="pasteClipboardToGroupUrl()" class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-xs font-semibold flex items-center transition-all">
+              <i data-lucide="clipboard" class="w-4 h-4 mr-1"></i>Paste
+            </button>
+          </div>
+        </div>
+
+        <!-- Settings Row -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Posts Volume</label>
+            <select id="scraper-max-posts" class="w-full border border-slate-300 rounded-lg p-2.5 bg-white text-xs">
+              <option value="15">15 Posts (Fast Test)</option>
+              <option value="30" selected>30 Posts (Recommended)</option>
+              <option value="60">60 Posts (Thorough)</option>
+              <option value="100">100 Posts (Deep Scan)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Scroll Depth</label>
+            <select id="scraper-max-scrolls" class="w-full border border-slate-300 rounded-lg p-2.5 bg-white text-xs">
+              <option value="5">5 Scrolls</option>
+              <option value="10" selected>10 Scrolls (Recommended)</option>
+              <option value="20">20 Scrolls (Deep)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Scraper Mode</label>
+            <select id="scraper-browser-mode" class="w-full border border-slate-300 rounded-lg p-2.5 bg-white text-xs font-medium text-slate-700">
+              <option value="headless" selected>Silent Background (Fast & Smooth)</option>
+              <option value="visible">Visible Chrome Window (Watch Live)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Big Action Buttons -->
+        <div class="flex gap-2 pt-1">
+          <button 
+            onclick="startFacebookGroupScrape()" 
+            id="btn-start-fb-scrape" 
+            class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3.5 rounded-xl text-sm flex items-center justify-center shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+          >
+            <i data-lucide="play" class="w-5 h-5 mr-2"></i>
+            <span>Start Scraping Facebook Group & Extract Agents</span>
+          </button>
+          <button 
+            onclick="stopActiveScrape()" 
+            id="btn-stop-fb-scrape"
+            class="px-4 py-3.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold rounded-xl text-xs flex items-center transition-all"
+            title="Stop Scraper"
+          >
+            <i data-lucide="square" class="w-4 h-4 mr-1"></i>Stop
+          </button>
+        </div>
+      </div>
+
+      <!-- Real-Time Scraper Console -->
+      <div class="bg-slate-900 rounded-2xl shadow-xl border border-slate-800 overflow-hidden">
+        <div class="px-5 py-3.5 bg-slate-950 flex items-center justify-between border-b border-slate-800">
+          <div class="flex items-center space-x-3">
+            <div class="flex space-x-1.5">
+              <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
+              <span class="w-3 h-3 rounded-full bg-amber-500/80"></span>
+              <span class="w-3 h-3 rounded-full bg-emerald-500/80"></span>
+            </div>
+            <span class="text-xs font-mono font-semibold text-slate-300">Live Scraper Console</span>
+            <span id="terminal-status-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">Idle</span>
+          </div>
+          <div class="flex items-center space-x-4 text-xs font-mono">
+            <span class="text-slate-400">Posts Indexed: <strong id="terminal-posts-count" class="text-white text-sm">0</strong></span>
+            <span class="text-slate-400">Phones Found: <strong id="terminal-phones-count" class="text-emerald-400 text-sm">0</strong></span>
+          </div>
+        </div>
+        <div id="terminal-logs-window" class="p-4 font-mono text-xs text-emerald-400 space-y-1.5 max-h-56 overflow-y-auto bg-slate-900/95 leading-relaxed">
+          <div class="text-slate-500">// Ready. Enter or select a Facebook Group URL above and click "Start Scraping".</div>
+        </div>
+      </div>
+
+      <!-- Discovered Agent Leads (Immediate Results on Screen) -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+          <div>
+            <h3 class="font-bold text-slate-900 text-sm flex items-center">
+              <i data-lucide="users" class="w-4 h-4 mr-2 text-emerald-600"></i>Discovered Agent Leads from Facebook
+            </h3>
+            <p class="text-xs text-slate-500">Contact information and property listings extracted directly from group posts</p>
+          </div>
+          <div class="space-x-2 flex items-center">
+            <button onclick="switchTab('agents')" class="text-xs font-semibold text-blue-600 hover:text-blue-700">
+              Open Full Lead Directory &rarr;
+            </button>
+            <button onclick="exportAgentsCsv()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-1.5 rounded-lg text-xs flex items-center border border-slate-300">
+              <i data-lucide="download" class="w-3.5 h-3.5 mr-1.5"></i>Export CSV
+            </button>
+          </div>
+        </div>
+        
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50 text-slate-600 font-semibold text-xs uppercase tracking-wider">
+              <tr>
+                <th scope="col" class="px-4 py-3 text-left">Agent Name</th>
+                <th scope="col" class="px-4 py-3 text-left">Phone Number</th>
+                <th scope="col" class="px-4 py-3 text-left">City & Area</th>
+                <th scope="col" class="px-4 py-3 text-left">Estimated Role</th>
+                <th scope="col" class="px-4 py-3 text-center">Score</th>
+                <th scope="col" class="px-4 py-3 text-right">Quick Contact</th>
+              </tr>
+            </thead>
+            <tbody id="scraper-quick-results-body" class="divide-y divide-slate-100">
+              <tr>
+                <td colspan="6" class="px-4 py-8 text-center text-slate-400 text-xs">
+                  Run a scrape above to discover agents live.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- TAB 2: ALL AGENT LEADS DIRECTORY & CRM                   -->
+    <!-- ======================================================== -->
+    <div id="tab-agents" class="tab-pane hidden space-y-4">
+      
+      <!-- Filter Bar -->
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+        <div class="flex flex-col md:flex-row md:items-center gap-3">
+          
+          <div class="relative flex-1">
+            <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-3 text-slate-400"></i>
+            <input 
+              type="text" 
+              id="agent-search-input" 
+              placeholder="Search by agent name, phone (+234...), area (e.g. Bodija, Lekki)..." 
+              class="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              oninput="debounceSearch()"
+            >
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2 text-xs">
+            <select id="agent-filter-city" onchange="fetchAgents(1)" class="border border-slate-300 rounded-lg px-3 py-2 bg-white text-slate-700">
+              <option value="">All Cities</option>
+              <option value="Ibadan">Ibadan</option>
+              <option value="Lagos">Lagos</option>
+              <option value="Abuja">Abuja</option>
+              <option value="Abeokuta">Abeokuta</option>
+            </select>
+
+            <select id="agent-filter-status" onchange="fetchAgents(1)" class="border border-slate-300 rounded-lg px-3 py-2 bg-white text-slate-700">
+              <option value="">All Statuses</option>
+              <option value="New">New</option>
+              <option value="Qualified">Qualified</option>
+              <option value="Contacted">Contacted</option>
+              <option value="Interested">Interested</option>
+              <option value="Registered on Locari">Registered on Locari</option>
+              <option value="Not Interested">Not Interested</option>
+              <option value="Do Not Contact">Do Not Contact</option>
+            </select>
+
+            <button onclick="exportAgentsCsv()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-2 rounded-lg flex items-center transition-all border border-slate-300">
+              <i data-lucide="download" class="w-3.5 h-3.5 mr-1.5"></i>Export CSV
+            </button>
+            <button onclick="openModal('mergeModal')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-2 rounded-lg flex items-center transition-all border border-slate-300">
+              <i data-lucide="git-merge" class="w-3.5 h-3.5 mr-1.5"></i>Merge Leads
+            </button>
+            <button onclick="confirmResetDatabase()" class="bg-red-50 hover:bg-red-100 text-red-700 font-semibold px-3 py-2 rounded-lg flex items-center transition-all border border-red-200" title="Delete all leads and reset database to empty">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5 mr-1.5 text-red-600"></i>Reset DB / Clear All
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Agents Table -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50 text-slate-600 font-semibold text-xs uppercase tracking-wider">
+              <tr>
+                <th scope="col" class="px-4 py-3 text-left">Agent & Contact</th>
+                <th scope="col" class="px-4 py-3 text-left">City & Location</th>
+                <th scope="col" class="px-4 py-3 text-left">Role</th>
+                <th scope="col" class="px-4 py-3 text-center">Ads</th>
+                <th scope="col" class="px-4 py-3 text-center">Score</th>
+                <th scope="col" class="px-4 py-3 text-left">Status</th>
+                <th scope="col" class="px-4 py-3 text-left">Last Active</th>
+                <th scope="col" class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="agents-table-body" class="divide-y divide-slate-100">
+              <tr>
+                <td colspan="8" class="px-4 py-8 text-center text-slate-400">Loading agent leads...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/50">
+          <div id="pagination-info">Showing 0 of 0 leads</div>
+          <div class="flex items-center space-x-1" id="pagination-controls"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- TAB 3: NIGERIAN PROPERTY PORTAL SCRAPER                  -->
+    <!-- ======================================================== -->
+    <div id="tab-portals" class="tab-pane hidden space-y-6">
+      
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+            <i data-lucide="globe" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Nigerian Property Portal Scraper</h3>
+            <p class="text-xs text-slate-500">Extract verified agent contacts and property listings from PropertyPro.ng and NigeriaPropertyCentre</p>
+          </div>
+        </div>
+
+        <!-- Portal Presets -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Preset Property Portal Searches (1-Click Fill):</label>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <button type="button" onclick="setPortalUrl('https://propertypro.ng/property-for-rent/flat-apartments/oyo/ibadan')" class="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-medium border border-emerald-200 transition-all flex items-center">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1 text-emerald-600"></i>Ibadan Apartments (PropertyPro.ng)
+            </button>
+            <button type="button" onclick="setPortalUrl('https://propertypro.ng/property-for-rent/flat-apartments/lagos/lekki')" class="px-3 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 font-medium border border-purple-200 transition-all flex items-center">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1 text-purple-600"></i>Lagos Lekki Rentals (PropertyPro.ng)
+            </button>
+            <button type="button" onclick="setPortalUrl('https://propertypro.ng/property/commercial-property-for-rent-berger-ojodu-lagos-6QLZS')" class="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium border border-blue-200 transition-all flex items-center">
+              <i data-lucide="file-text" class="w-3.5 h-3.5 mr-1 text-blue-600"></i>Single Property Listing (PropertyPro)
+            </button>
+            <button type="button" onclick="setPortalUrl('https://nigeriapropertycentre.com/for-rent/flats-apartments/oyo/ibadan')" class="px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium border border-amber-200 transition-all flex items-center">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1 text-amber-600"></i>Ibadan Flats (NigeriaPropertyCentre)
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-800 mb-1">Property Portal URL (Search Page or Single Listing)</label>
+          <div class="flex gap-2">
+            <input 
+              type="text" 
+              id="scraper-portal-url" 
+              placeholder="https://propertypro.ng/property-for-rent/... or single listing link" 
+              class="w-full px-3.5 py-3 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-purple-500 focus:outline-none bg-slate-50/50"
+              value="https://propertypro.ng/property-for-rent/flat-apartments/oyo/ibadan"
+            >
+            <button type="button" onclick="pasteClipboardToPortalUrl()" class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-xs font-semibold flex items-center transition-all">
+              <i data-lucide="clipboard" class="w-4 h-4 mr-1"></i>Paste
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Pages to Scrape</label>
+            <select id="scraper-portal-pages" class="w-full border border-slate-300 rounded-lg p-2.5 bg-white text-xs">
+              <option value="1" selected>1 Page (~25 to 40 listings)</option>
+              <option value="2">2 Pages (~50 to 80 listings)</option>
+              <option value="3">3 Pages (~100 listings)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Browser Mode</label>
+            <select id="scraper-portal-mode" class="w-full border border-slate-300 rounded-lg p-2.5 bg-white text-xs">
+              <option value="headless" selected>Silent Background (Fast)</option>
+              <option value="visible">Visible Chrome Window</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex gap-2 pt-1">
+          <button 
+            onclick="startPortalScrape()" 
+            id="btn-start-portal-scrape" 
+            class="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-3.5 rounded-xl text-sm flex items-center justify-center shadow-lg shadow-purple-500/20 transition-all cursor-pointer"
+          >
+            <i data-lucide="play" class="w-5 h-5 mr-2"></i>
+            <span>Scrape Property Portal & Extract Agent Phones</span>
+          </button>
+          <button 
+            onclick="stopActiveScrape()" 
+            class="px-4 py-3.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold rounded-xl text-xs flex items-center transition-all"
+            title="Stop Scraper"
+          >
+            <i data-lucide="square" class="w-4 h-4 mr-1"></i>Stop
+          </button>
+        </div>
+      </div>
+
+      <!-- Real-Time Portal Scraper Console -->
+      <div class="bg-slate-900 rounded-2xl shadow-xl border border-slate-800 overflow-hidden">
+        <div class="px-5 py-3.5 bg-slate-950 flex items-center justify-between border-b border-slate-800">
+          <div class="flex items-center space-x-3">
+            <div class="flex space-x-1.5">
+              <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
+              <span class="w-3 h-3 rounded-full bg-amber-500/80"></span>
+              <span class="w-3 h-3 rounded-full bg-purple-500/80"></span>
+            </div>
+            <span class="text-xs font-mono font-semibold text-slate-300">Portal Scraper Console</span>
+            <span id="portal-terminal-status" class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">Idle</span>
+          </div>
+          <div class="flex items-center space-x-4 text-xs font-mono">
+            <span class="text-slate-400">Listings: <strong id="portal-posts-count" class="text-white text-sm">0</strong></span>
+            <span class="text-slate-400">Phones: <strong id="portal-phones-count" class="text-purple-400 text-sm">0</strong></span>
+          </div>
+        </div>
+        <div id="portal-logs-window" class="p-4 font-mono text-xs text-purple-300 space-y-1.5 max-h-56 overflow-y-auto bg-slate-900/95 leading-relaxed">
+          <div class="text-slate-500">// Ready. Enter a PropertyPro or NigeriaPropertyCentre link above and click "Scrape Property Portal".</div>
+        </div>
+      </div>
+
+      <!-- Discovered Portal Agent Leads -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+          <div>
+            <h3 class="font-bold text-slate-900 text-sm flex items-center">
+              <i data-lucide="users" class="w-4 h-4 mr-2 text-purple-600"></i>Discovered Portal Agent Leads
+            </h3>
+            <p class="text-xs text-slate-500">Contact details and listings extracted directly from real estate portals</p>
+          </div>
+          <div class="space-x-2 flex items-center">
+            <button onclick="switchTab('agents')" class="text-xs font-semibold text-purple-600 hover:text-purple-700">
+              Open Full CRM Directory &rarr;
+            </button>
+            <button onclick="exportAgentsCsv()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-1.5 rounded-lg text-xs flex items-center border border-slate-300">
+              <i data-lucide="download" class="w-3.5 h-3.5 mr-1.5"></i>Export CSV
+            </button>
+          </div>
+        </div>
+        
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50 text-slate-600 font-semibold text-xs uppercase tracking-wider">
+              <tr>
+                <th scope="col" class="px-4 py-3 text-left">Agent Name</th>
+                <th scope="col" class="px-4 py-3 text-left">Phone Number</th>
+                <th scope="col" class="px-4 py-3 text-left">City & Location</th>
+                <th scope="col" class="px-4 py-3 text-left">Estimated Role</th>
+                <th scope="col" class="px-4 py-3 text-center">Score</th>
+                <th scope="col" class="px-4 py-3 text-right">Quick Contact</th>
+              </tr>
+            </thead>
+            <tbody id="portal-quick-results-body" class="divide-y divide-slate-100">
+              <tr>
+                <td colspan="6" class="px-4 py-8 text-center text-slate-400 text-xs">
+                  Run a portal scrape above to discover agents live.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- TAB 4: DASHBOARD & STATS                                 -->
+    <!-- ======================================================== -->
+    <div id="tab-dashboard" class="tab-pane hidden space-y-6">
+      
+      <!-- Metrics KPI Grid -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs font-medium text-slate-500 flex items-center justify-between">
+            <span>Total Leads</span>
+            <i data-lucide="database" class="w-4 h-4 text-slate-400"></i>
+          </div>
+          <div id="stat-total-leads" class="text-2xl font-bold text-slate-900 mt-2">0</div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs font-medium text-slate-500 flex items-center justify-between">
+            <span>Qualified</span>
+            <i data-lucide="award" class="w-4 h-4 text-emerald-500"></i>
+          </div>
+          <div id="stat-qualified-agents" class="text-2xl font-bold text-emerald-600 mt-2">0</div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs font-medium text-slate-500 flex items-center justify-between">
+            <span>Contacted</span>
+            <i data-lucide="phone-outgoing" class="w-4 h-4 text-blue-500"></i>
+          </div>
+          <div id="stat-contacted-leads" class="text-2xl font-bold text-blue-600 mt-2">0</div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs font-medium text-slate-500 flex items-center justify-between">
+            <span>Interested</span>
+            <i data-lucide="sparkles" class="w-4 h-4 text-amber-500"></i>
+          </div>
+          <div id="stat-interested-leads" class="text-2xl font-bold text-amber-600 mt-2">0</div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs font-medium text-slate-500 flex items-center justify-between">
+            <span>Locari Registered</span>
+            <i data-lucide="check-circle-2" class="w-4 h-4 text-purple-500"></i>
+          </div>
+          <div id="stat-registered-locari" class="text-2xl font-bold text-purple-600 mt-2">0</div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs font-medium text-slate-500 flex items-center justify-between">
+            <span>Advertisements</span>
+            <i data-lucide="home" class="w-4 h-4 text-indigo-500"></i>
+          </div>
+          <div id="stat-total-ads" class="text-2xl font-bold text-indigo-600 mt-2">0</div>
+        </div>
+      </div>
+
+      <!-- City & Source Rankings -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
+          <h3 class="text-sm font-bold text-slate-900 flex items-center">
+            <i data-lucide="map-pin" class="w-4 h-4 mr-2 text-emerald-600"></i>Contacts by City
+          </h3>
+          <div id="city-breakdown-list" class="space-y-2"></div>
+        </div>
+
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
+          <h3 class="text-sm font-bold text-slate-900 flex items-center">
+            <i data-lucide="compass" class="w-4 h-4 mr-2 text-purple-600"></i>Top Source Group Yields
+          </h3>
+          <div id="top-sources-list" class="space-y-2"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- TAB 5: OUTREACH CRM PIPELINE                             -->
+    <!-- ======================================================== -->
+    <div id="tab-outreach" class="tab-pane hidden space-y-6">
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+          <div>
+            <h3 class="text-sm font-bold text-slate-900 flex items-center">
+              <i data-lucide="calendar" class="w-4 h-4 mr-2 text-emerald-600"></i>Scheduled Follow-ups Due
+            </h3>
+            <p class="text-xs text-slate-500 mt-0.5">Leads awaiting next contact call or WhatsApp</p>
+          </div>
+          <span id="followup-count-badge" class="px-2.5 py-0.5 bg-amber-100 text-amber-800 rounded-full text-xs font-semibold">0 pending</span>
+        </div>
+        <div id="followups-list" class="divide-y divide-slate-100"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: AGENT DETAIL & OUTREACH                           -->
+  <!-- ======================================================== -->
+  <div id="agentDetailModal" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div class="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+        <div class="flex items-center space-x-3">
+          <div id="modal-agent-avatar" class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-sm">AG</div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <h3 id="modal-agent-name" class="font-bold text-slate-900 text-base">Agent Name</h3>
+              <span id="modal-agent-score-badge" class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">Score: 85</span>
+              <span id="modal-agent-status-badge" class="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">Qualified</span>
+            </div>
+            <p id="modal-agent-phones" class="text-xs text-slate-500 mt-0.5">+234 803 000 0000</p>
+          </div>
+        </div>
+        <button onclick="closeModal('agentDetailModal')" class="text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
+        <div class="flex flex-wrap gap-2 text-xs">
+          <a id="modal-whatsapp-btn" href="#" target="_blank" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold px-3 py-2 rounded-lg border border-emerald-200 flex items-center transition-all">
+            <i data-lucide="message-circle" class="w-3.5 h-3.5 mr-1.5"></i>Chat on WhatsApp
+          </a>
+          <a id="modal-call-btn" href="#" class="bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold px-3 py-2 rounded-lg border border-blue-200 flex items-center transition-all">
+            <i data-lucide="phone" class="w-3.5 h-3.5 mr-1.5"></i>Call Phone
+          </a>
+          <button id="modal-sync-locari-btn" onclick="syncCurrentAgentToLocari()" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-3 py-2 rounded-lg flex items-center transition-all shadow-sm">
+            <i data-lucide="check-circle" class="w-3.5 h-3.5 mr-1.5"></i>Sync to Locari Platform
+          </button>
+        </div>
+
+        <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1 text-xs">
+          <div class="font-bold text-slate-700 flex justify-between">
+            <span>Score Factors & Linguistic Analysis</span>
+            <span id="modal-role-text" class="text-emerald-700 font-bold">Likely Property Agent</span>
+          </div>
+          <p id="modal-score-explanation" class="text-slate-600 leading-relaxed"></p>
+        </div>
+
+        <!-- Log Outreach Activity -->
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center">
+            <i data-lucide="clipboard-edit" class="w-3.5 h-3.5 mr-1.5 text-emerald-600"></i>Log Communication / Outreach
+          </h4>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div>
+              <label class="block text-[11px] font-medium text-slate-500 mb-1">Channel</label>
+              <select id="outreach-channel" class="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white">
+                <option value="WhatsApp">WhatsApp</option>
+                <option value="Phone Call">Phone Call</option>
+                <option value="SMS">SMS</option>
+                <option value="Locari Invite">Locari Direct Invite</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] font-medium text-slate-500 mb-1">Outcome</label>
+              <select id="outreach-outcome" class="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white">
+                <option value="Conversation">Good Conversation</option>
+                <option value="Interested">Interested in Locari</option>
+                <option value="Requested Follow-Up">Requested Follow-Up</option>
+                <option value="Registered">Registered on Locari</option>
+                <option value="Left Message">Left Message</option>
+                <option value="No Answer">No Answer</option>
+                <option value="Not Interested">Not Interested</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] font-medium text-slate-500 mb-1">Follow-up Date</label>
+              <input type="date" id="outreach-followup-date" class="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white">
+            </div>
+          </div>
+          <div>
+            <label class="block text-[11px] font-medium text-slate-500 mb-1">Notes</label>
+            <textarea id="outreach-notes" rows="2" placeholder="Record what the agent said..." class="w-full border border-slate-300 rounded-lg p-2 text-xs"></textarea>
+          </div>
+          <div class="flex justify-end">
+            <button onclick="submitOutreachLog()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-4 py-1.5 rounded-lg text-xs">Save Log</button>
+          </div>
+        </div>
+
+        <!-- Advertisements List -->
+        <div class="space-y-2">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700">Advertisements Discovered (<span id="modal-ads-count">0</span>)</h4>
+          <div id="modal-ads-list" class="space-y-2 max-h-56 overflow-y-auto"></div>
+        </div>
+      </div>
+
+      <div class="p-4 border-t border-slate-100 flex justify-end bg-slate-50/50">
+        <button onclick="closeModal('agentDetailModal')" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-4 py-2 rounded-lg text-xs">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: FACEBOOK SESSION & COOKIES -->
+  <div id="facebookSessionModal" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="key" class="w-5 h-5 text-amber-500"></i>
+          <h3 class="font-bold text-slate-900 text-base">Facebook Session Settings</h3>
+        </div>
+        <button onclick="closeModal('facebookSessionModal')" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
+        <p class="font-bold flex items-center"><i data-lucide="info" class="w-3.5 h-3.5 mr-1 text-blue-600"></i>Public vs Private Groups:</p>
+        <p class="text-[11px] leading-relaxed">
+          • <strong>Public Groups</strong> can be scraped directly without logging in.<br>
+          • <strong>Closed or Private Groups</strong> you have joined require session cookies so the scraper can see posts.
+        </p>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-800 mb-1">Paste Facebook Cookies (c_user & xs)</label>
+        <p class="text-[11px] text-slate-500 mb-2">Example format: <code>c_user=100012345678; xs=abcdef123456...</code> or JSON cookie array.</p>
+        <textarea id="modal-fb-cookies-input" rows="3" placeholder="c_user=1000...; xs=...;" class="w-full border border-slate-300 rounded-xl p-3 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none bg-slate-50"></textarea>
+      </div>
+
+      <div class="flex items-center justify-between pt-2">
+        <button onclick="clearFacebookCookiesAction()" class="text-xs text-red-600 hover:text-red-700 font-semibold flex items-center">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5 mr-1"></i>Remove Cookies
+        </button>
+        <div class="space-x-2">
+          <button onclick="closeModal('facebookSessionModal')" class="px-3.5 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50">Cancel</button>
+          <button onclick="saveFacebookCookiesAction()" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow">Save Session</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: MERGE -->
+  <div id="mergeModal" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden p-5 space-y-4">
+      <h3 class="font-bold text-slate-900 text-sm">Merge Duplicate Agent Records</h3>
+      <input type="text" id="merge-target-id" placeholder="Primary Agent ID to KEEP" class="w-full border border-slate-300 rounded-lg p-2 text-xs">
+      <input type="text" id="merge-source-id" placeholder="Duplicate Agent ID to MERGE & DELETE" class="w-full border border-slate-300 rounded-lg p-2 text-xs">
+      <div class="flex justify-end space-x-2">
+        <button onclick="closeModal('mergeModal')" class="px-4 py-1.5 rounded-lg border text-xs">Cancel</button>
+        <button onclick="submitAgentMerge()" class="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-semibold">Confirm Merge</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 space-y-2 pointer-events-none"></div>
+
+  <!-- Scripts -->
+  <script src="/app.js"></script>
+  <script>
+    lucide.createIcons();
+  </script>
+</body>
+</html>

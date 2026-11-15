@@ -1,0 +1,91 @@
+/* Locari Agent Finder - Stylesheet */
+
+.nav-tab.active {
+  background-color: #ffffff;
+  color: #059669; /* emerald-600 */
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  font-weight: 600;
+}
+
+.nav-tab:not(.active) {
+  color: #64748b; /* slate-500 */
+}
+
+.nav-tab:not(.active):hover {
+  color: #0f172a;
+}
+
+.ingest-subtab.active {
+  background-color: #ecfdf5; /* emerald-50 */
+  color: #059669;
+  border-bottom: 2px solid #059669;
+}
+
+.ingest-subtab:not(.active) {
+  color: #64748b;
+}
+
+.ingest-subtab:not(.active):hover {
+  color: #0f172a;
+  background-color: #f8fafc;
+}
+
+/* Score Pills */
+.score-badge-high {
+  background-color: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.score-badge-medium {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.score-badge-low {
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+/* Status Badges */
+.status-badge-new {
+  background-color: #e0f2fe;
+  color: #0369a1;
+}
+
+.status-badge-qualified {
+  background-color: #dcfce7;
+  color: #15803d;
+}
+
+.status-badge-contacted {
+  background-color: #e0e7ff;
+  color: #4338ca;
+}
+
+.status-badge-interested {
+  background-color: #fef9c3;
+  color: #a16207;
+}
+
+.status-badge-registered {
+  background-color: #f3e8ff;
+  color: #7e22ce;
+}
+
+.status-badge-dnc {
+  background-color: #fee2e2;
+  color: #b91c1c;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tab-pane:not(.hidden) {
+  animation: fadeIn 0.15s ease-out;
+}
