@@ -113,6 +113,9 @@ function initDatabase() {
       phoneNumber TEXT,
       formattedWhatsApp TEXT,
       email TEXT,
+      propertyType TEXT,
+      location TEXT,
+      price TEXT,
       postSnippet TEXT,
       postUrl TEXT,
       scrapedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -134,6 +137,14 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_leads_scraped ON leads(scrapedAt);
     CREATE INDEX IF NOT EXISTS idx_groups_url ON groups(url);
   `);
+
+  // Migrate leads table columns if they do not exist
+  try {
+    const leadCols = db.prepare('PRAGMA table_info(leads)').all().map(c => c.name);
+    if (!leadCols.includes('propertyType')) db.exec('ALTER TABLE leads ADD COLUMN propertyType TEXT;');
+    if (!leadCols.includes('location')) db.exec('ALTER TABLE leads ADD COLUMN location TEXT;');
+    if (!leadCols.includes('price')) db.exec('ALTER TABLE leads ADD COLUMN price TEXT;');
+  } catch (_) {}
 
   // Seed standard Nigerian property discovery sources if none exist
   seedDefaultSources();
@@ -268,6 +279,9 @@ function insertLead({
   phoneNumber = null,
   formattedWhatsApp = null,
   email = null,
+  propertyType = null,
+  location = null,
+  price = null,
   postSnippet = '',
   postUrl = null,
   status = 'New',
@@ -290,17 +304,20 @@ function insertLead({
       SET agentName = COALESCE(?, agentName),
           formattedWhatsApp = COALESCE(?, formattedWhatsApp),
           email = COALESCE(?, email),
+          propertyType = COALESCE(?, propertyType),
+          location = COALESCE(?, location),
+          price = COALESCE(?, price),
           postSnippet = COALESCE(?, postSnippet),
           scrapedAt = ?
       WHERE id = ?
-    `).run(agentName, formattedWhatsApp, email, postSnippet, scrapedAt, existing.id);
+    `).run(agentName, formattedWhatsApp, email, propertyType, location, price, postSnippet, scrapedAt, existing.id);
     return db.prepare('SELECT * FROM leads WHERE id = ?').get(existing.id);
   }
 
   db.prepare(`
-    INSERT INTO leads (id, groupId, agentName, phoneNumber, formattedWhatsApp, email, postSnippet, postUrl, scrapedAt, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, groupId, agentName, phoneNumber, formattedWhatsApp, email, postSnippet, postUrl, scrapedAt, status);
+    INSERT INTO leads (id, groupId, agentName, phoneNumber, formattedWhatsApp, email, propertyType, location, price, postSnippet, postUrl, scrapedAt, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, groupId, agentName, phoneNumber, formattedWhatsApp, email, propertyType, location, price, postSnippet, postUrl, scrapedAt, status);
 
   // Update total leads count in group if groupId provided
   if (groupId) {
@@ -329,8 +346,8 @@ function getLeads({
 
   if (search && search.trim()) {
     const s = `%${search.trim()}%`;
-    where.push('(agentName LIKE ? OR phoneNumber LIKE ? OR postSnippet LIKE ? OR email LIKE ?)');
-    params.push(s, s, s, s);
+    where.push('(agentName LIKE ? OR phoneNumber LIKE ? OR postSnippet LIKE ? OR email LIKE ? OR propertyType LIKE ? OR location LIKE ? OR price LIKE ?)');
+    params.push(s, s, s, s, s, s, s);
   }
 
   if (groupId && groupId.trim()) {
@@ -379,7 +396,7 @@ function getLeads({
 }
 
 function updateLead(id, updates = {}) {
-  const allowed = ['agentName', 'phoneNumber', 'formattedWhatsApp', 'email', 'postSnippet', 'status'];
+  const allowed = ['agentName', 'phoneNumber', 'formattedWhatsApp', 'email', 'propertyType', 'location', 'price', 'postSnippet', 'status'];
   const setClauses = [];
   const params = [];
 

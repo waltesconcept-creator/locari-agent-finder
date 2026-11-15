@@ -1,381 +1,851 @@
 /**
- * Locari Agent Finder - Frontend Application Script
+ * Locarie Agent Finder - Production Web Application Script
+ * Full-stack Facebook Group Scraper, Direct Ingest & Leads CRM
  */
 
-let currentTab = 'scraper';
-let currentAgentsPage = 1;
+// Global State
+let currentMainTab = 'scraper';
 let currentLeadsPage = 1;
-let currentAgentDetailId = null;
-let searchDebounceTimer = null;
 let leadSearchDebounceTimer = null;
+let scraperPollingInterval = null;
+let cachedLeads = [];
 
-// Initialize app on DOM ready
+// ==========================================
+// INITIALIZATION
+// ==========================================
 document.addEventListener('DOMContentLoaded', () => {
-  fetchQuickScraperResults();
-  fetchDashboardStats();
-  fetchFollowups();
-  checkFacebookSessionStatus();
-  fetchLeads(1);
-  fetchGroupsForFilter();
+  // 1. Initial UI environment setup
+  initEnvironmentAwareness();
 
-  // If in cloud environment, disable visible window option and enforce headless background
-  if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    const opt1 = document.getElementById('opt-visible-window');
-    if (opt1) {
-      opt1.disabled = true;
-      opt1.textContent = 'Visible Window (Localhost Only)';
-    }
-    const opt2 = document.getElementById('opt-portal-visible');
-    if (opt2) {
-      opt2.disabled = true;
-      opt2.textContent = 'Visible Window (Localhost Only)';
-    }
-    const select1 = document.getElementById('scraper-browser-mode');
-    if (select1) select1.value = 'headless';
-    const select2 = document.getElementById('scraper-portal-mode');
-    if (select2) select2.value = 'headless';
+  // 2. Fetch Facebook session status
+  checkFacebookSessionStatus();
+
+  // 3. Fetch initial leads and update CRM badge count
+  fetchLeads(1);
+
+  // 4. Check if a scraper is already running in background
+  checkExistingScraperJob();
+
+  // 5. Initialize Lucide icons
+  if (window.lucide) {
+    window.lucide.createIcons();
   }
 });
 
-// Toast notification helper
+function initEnvironmentAwareness() {
+  const isCloudHost = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+  if (isCloudHost) {
+    const optVisible = document.getElementById('opt-visible-window');
+    if (optVisible) {
+      optVisible.disabled = true;
+      optVisible.textContent = 'Visible Window (Localhost Only)';
+    }
+    const selectMode = document.getElementById('scraper-browser-mode');
+    if (selectMode) {
+      selectMode.value = 'headless';
+    }
+  }
+}
+
+// ==========================================
+// TOAST NOTIFICATIONS & UTILITIES
+// ==========================================
 function showToast(message, type = 'success') {
   const container = document.getElementById('toast-container');
+  if (!container) return;
+
   const toast = document.createElement('div');
-  const bg = type === 'success' ? 'bg-emerald-800 text-white' : (type === 'error' ? 'bg-red-800 text-white' : (type === 'info' ? 'bg-blue-800 text-white' : 'bg-slate-800 text-white'));
-  toast.className = `${bg} px-4 py-2.5 rounded-xl shadow-lg text-xs font-semibold flex items-center space-x-2 transition-all transform translate-y-2 pointer-events-auto`;
-  toast.innerHTML = `<span>${message}</span>`;
+  const bg = type === 'success' ? 'bg-emerald-700 text-white' : 
+             type === 'error' ? 'bg-red-700 text-white' : 
+             type === 'info' ? 'bg-blue-700 text-white' : 'bg-slate-800 text-white';
+
+  toast.className = `${bg} px-4 py-2.5 rounded-xl shadow-lg text-xs font-semibold flex items-center space-x-2 transition-all duration-200 transform translate-y-2 pointer-events-auto border border-white/10`;
+  toast.innerHTML = `<span>${escapeHtml(message)}</span>`;
   container.appendChild(toast);
 
   setTimeout(() => {
     toast.classList.add('opacity-0', 'translate-y-4');
-    setTimeout(() => toast.remove(), 200);
-  }, 3500);
+    setTimeout(() => toast.remove(), 250);
+  }, 4000);
 }
 
-// ==========================================
-// NAVIGATION & MODALS
-// ==========================================
-function switchTab(tabName) {
-  currentTab = tabName;
-  document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
-  const navBtn = document.getElementById(`nav-${tabName}`);
-  if (navBtn) navBtn.classList.add('active');
-
-  const pane = document.getElementById(`tab-${tabName}`);
-  if (pane) pane.classList.remove('hidden');
-
-  if (tabName === 'scraper') fetchQuickScraperResults();
-  if (tabName === 'agents') {
-    fetchLeads(currentLeadsPage);
-    fetchGroupsForFilter();
+function formatDate(isoStr) {
+  if (!isoStr) return '—';
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch (_) {
+    return isoStr;
   }
-  if (tabName === 'dashboard') fetchDashboardStats();
-  if (tabName === 'outreach') fetchFollowups();
-
-  lucide.createIcons();
 }
 
-function switchIngestMode(mode) {
-  document.querySelectorAll('.ingest-subtab').forEach(b => b.classList.remove('active'));
-  ['scraper', 'quick', 'clipper', 'csv'].forEach(m => {
-    const pane = document.getElementById(`pane-ingest-${m}`);
-    if (pane) pane.classList.add('hidden');
-  });
+/**
+ * Robust Facebook Group URL Sanitizer:
+ * Cleans double-pasting or accidental prefixes like https://wehttps://...
+ */
+function sanitizeFacebookGroupUrl(input) {
+  if (!input) return '';
+  let str = String(input).trim();
 
-  const activeTabBtn = document.getElementById(`sub-ingest-${mode}`);
-  if (activeTabBtn) activeTabBtn.classList.add('active');
+  // Recover from accidental nested protocol
+  const embeddedProtocol = str.match(/https?:\/\/[a-z0-9._-]*?(https?:\/\/[^\s"']+)/i);
+  if (embeddedProtocol) {
+    str = embeddedProtocol[1];
+  }
 
-  const targetPane = document.getElementById(`pane-ingest-${mode}`);
-  if (targetPane) targetPane.classList.remove('hidden');
+  // Extract clean Facebook share group link
+  const shareMatch = str.match(/https?:\/\/(?:[a-zA-Z0-9-]+\.)*facebook\.com\/share\/g\/([a-zA-Z0-9_-]+)/i);
+  if (shareMatch) {
+    return `https://www.facebook.com/share/g/${shareMatch[1]}/`;
+  }
 
-  lucide.createIcons();
+  // Extract clean Facebook group link
+  const groupMatch = str.match(/https?:\/\/(?:[a-zA-Z0-9-]+\.)*facebook\.com\/groups\/([a-zA-Z0-9._-]+)/i);
+  if (groupMatch) {
+    const groupId = groupMatch[1];
+    if (groupId !== 'joins' && groupId !== 'feed' && groupId !== 'discover') {
+      return `https://www.facebook.com/groups/${groupId}/`;
+    }
+  }
+
+  return str;
 }
 
+// ==========================================
+// NAVIGATION (TAB SWITCHING)
+// ==========================================
+function switchMainTab(tabName) {
+  currentMainTab = tabName;
+
+  const btnScraper = document.getElementById('nav-scraper');
+  const btnLeads = document.getElementById('nav-leads');
+  const paneScraper = document.getElementById('tab-scraper');
+  const paneLeads = document.getElementById('tab-leads');
+
+  if (tabName === 'scraper') {
+    if (btnScraper) btnScraper.classList.add('active');
+    if (btnLeads) btnLeads.classList.remove('active');
+    if (paneScraper) paneScraper.classList.remove('hidden');
+    if (paneLeads) paneLeads.classList.add('hidden');
+  } else if (tabName === 'leads') {
+    if (btnLeads) btnLeads.classList.add('active');
+    if (btnScraper) btnScraper.classList.remove('active');
+    if (paneLeads) paneLeads.classList.remove('hidden');
+    if (paneScraper) paneScraper.classList.add('hidden');
+
+    // Refresh leads when opening CRM
+    fetchLeads(currentLeadsPage);
+  }
+
+  if (window.lucide) {
+    window.lucide.createIcons();
+  }
+}
+
+// Modal generic open/close
 function openModal(id) {
   const modal = document.getElementById(id);
   if (modal) {
     modal.classList.remove('hidden');
-    lucide.createIcons();
+    if (window.lucide) window.lucide.createIcons();
   }
 }
 
 function closeModal(id) {
   const modal = document.getElementById(id);
-  if (modal) modal.classList.add('hidden');
-}
-
-// ==========================================
-// 1. DASHBOARD ANALYTICS
-// ==========================================
-async function fetchDashboardStats() {
-  try {
-    const res = await fetch('/api/dashboard/stats').then(r => r.json());
-    if (!res.success) return;
-
-    const { summary, cityBreakdown, roleBreakdown, topSources, mostActiveAgents, recentAds } = res.data;
-
-    // Update KPI numbers
-    document.getElementById('stat-total-leads').textContent = (summary.totalLeads || 0).toLocaleString();
-    document.getElementById('stat-qualified-agents').textContent = (summary.qualifiedAgents || 0).toLocaleString();
-    document.getElementById('stat-contacted-leads').textContent = (summary.contactedLeads || 0).toLocaleString();
-    document.getElementById('stat-interested-leads').textContent = (summary.interestedLeads || 0).toLocaleString();
-    document.getElementById('stat-registered-locari').textContent = (summary.registeredLocari || 0).toLocaleString();
-    document.getElementById('stat-total-ads').textContent = (summary.totalAds || 0).toLocaleString();
-
-    // Render City Breakdown
-    const cityList = document.getElementById('city-breakdown-list');
-    if (cityBreakdown.length === 0) {
-      cityList.innerHTML = '<div class="text-xs text-slate-400 text-center py-2">No city data indexed yet.</div>';
-    } else {
-      cityList.innerHTML = cityBreakdown.map(c => `
-        <div class="flex items-center justify-between text-xs py-1 border-b border-slate-50 last:border-0">
-          <div class="font-medium text-slate-700 flex items-center">
-            <span class="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
-            ${escapeHtml(c.city)}
-          </div>
-          <div class="flex items-center space-x-2">
-            <span class="font-bold text-slate-900">${c.count} leads</span>
-            <span class="text-[10px] text-slate-400">avg score: ${c.avg_score || 0}</span>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    // Render Role Breakdown
-    const roleList = document.getElementById('role-breakdown-list');
-    if (roleBreakdown.length === 0) {
-      roleList.innerHTML = '<div class="text-xs text-slate-400 text-center py-2">No roles classified yet.</div>';
-    } else {
-      roleList.innerHTML = roleBreakdown.map(r => `
-        <div class="flex items-center justify-between text-xs py-1 border-b border-slate-50 last:border-0">
-          <div class="font-medium text-slate-700 flex items-center">
-            <span class="w-2 h-2 rounded-full bg-blue-500 mr-2"></span>
-            ${escapeHtml(r.role)}
-          </div>
-          <span class="font-bold text-slate-900">${r.count}</span>
-        </div>
-      `).join('');
-    }
-
-    // Render Top Sources
-    const sourcesList = document.getElementById('top-sources-list');
-    if (topSources.length === 0) {
-      sourcesList.innerHTML = '<div class="text-xs text-slate-400 text-center py-2">No sources tracked yet.</div>';
-    } else {
-      sourcesList.innerHTML = topSources.slice(0, 4).map(s => `
-        <div class="flex items-center justify-between text-xs py-1 border-b border-slate-50 last:border-0">
-          <div class="font-medium text-slate-700 truncate max-w-[170px]" title="${escapeHtml(s.name)}">
-            ${escapeHtml(s.name)}
-          </div>
-          <div class="flex items-center space-x-1.5">
-            <span class="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-bold text-[10px]">${s.total_agents} agents</span>
-            <span class="text-[10px] text-slate-400">(${s.total_ads} ads)</span>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    // Render Most Active Agents
-    const activeList = document.getElementById('most-active-agents-list');
-    if (mostActiveAgents.length === 0) {
-      activeList.innerHTML = '<div class="p-6 text-center text-xs text-slate-400">No agent leads found yet. Use Ingestion Studio to import posts.</div>';
-    } else {
-      activeList.innerHTML = mostActiveAgents.map(a => `
-        <div class="p-3.5 hover:bg-slate-50/80 transition-all flex items-center justify-between cursor-pointer" onclick="openAgentDetailModal('${a.id}')">
-          <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center justify-center">
-              ${escapeHtml(a.name.slice(0, 2).toUpperCase())}
-            </div>
-            <div>
-              <div class="font-semibold text-slate-900 text-xs">${escapeHtml(a.name)}</div>
-              <div class="text-[11px] text-slate-500">${escapeHtml(a.primary_phone)} • ${escapeHtml(a.primary_city || 'Nigeria')}</div>
-            </div>
-          </div>
-          <div class="text-right flex items-center space-x-2">
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${getScoreBadgeClass(a.lead_score)}">Score: ${a.lead_score}</span>
-            <span class="text-xs font-bold text-slate-700">${a.advertisements_count} ads</span>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    // Render Recent Ads Feed
-    const feed = document.getElementById('recent-ads-feed');
-    if (recentAds.length === 0) {
-      feed.innerHTML = '<div class="p-6 text-center text-xs text-slate-400">No advertisements indexed yet.</div>';
-    } else {
-      feed.innerHTML = recentAds.map(ad => `
-        <div class="p-3.5 hover:bg-slate-50/80 transition-all space-y-1.5 cursor-pointer" onclick="openAgentDetailModal('${ad.agent_id}')">
-          <div class="flex items-center justify-between">
-            <span class="font-bold text-slate-900 text-xs">${escapeHtml(ad.property_type)} • <span class="text-emerald-700 font-extrabold">${ad.rent_amount ? formatNaira(ad.rent_amount) : 'Price on request'}</span></span>
-            <span class="text-[10px] text-slate-400">${formatDate(ad.posted_at || ad.collected_at)}</span>
-          </div>
-          <p class="text-xs text-slate-600 line-clamp-2">${escapeHtml(ad.raw_text)}</p>
-          <div class="flex items-center justify-between text-[11px] text-slate-500 pt-1">
-            <span>By <strong class="text-slate-700">${escapeHtml(ad.agent_name)}</strong> (${escapeHtml(ad.primary_phone)})</span>
-            <span class="text-indigo-600 font-medium">${escapeHtml(ad.neighbourhood || ad.city || '')}</span>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    lucide.createIcons();
-  } catch (err) {
-    console.error('Failed to load stats:', err);
+  if (modal) {
+    modal.classList.add('hidden');
   }
 }
 
 // ==========================================
-// LEADS CRM & DIRECTORY
+// 1. LIVE FACEBOOK GROUP CRAWLER
+// ==========================================
+function setGroupUrl(url) {
+  const input = document.getElementById('scraper-group-url');
+  if (input) {
+    input.value = url;
+    showToast('Group URL loaded! Click "Start Scraping" below.');
+    input.focus();
+  }
+}
+
+async function pasteClipboardToGroupUrl() {
+  try {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) {
+        const cleaned = sanitizeFacebookGroupUrl(text.trim());
+        const input = document.getElementById('scraper-group-url');
+        if (input) {
+          input.value = cleaned;
+          showToast('Pasted Facebook link from clipboard!');
+          return;
+        }
+      }
+    }
+  } catch (_) {}
+  const input = document.getElementById('scraper-group-url');
+  if (input) {
+    input.focus();
+    input.select();
+    showToast('Press Ctrl+V to paste your group link', 'info');
+  }
+}
+
+function clearGroupUrl() {
+  const input = document.getElementById('scraper-group-url');
+  if (input) {
+    input.value = '';
+    input.focus();
+  }
+}
+
+async function startFacebookGroupScrape() {
+  const input = document.getElementById('scraper-group-url');
+  const rawUrl = input?.value.trim();
+  const maxPosts = document.getElementById('scraper-max-posts')?.value || '30';
+  const browserMode = document.getElementById('scraper-browser-mode')?.value || 'headless';
+
+  if (!rawUrl) {
+    showToast('Please enter a Facebook Group URL first.', 'error');
+    if (input) input.focus();
+    return;
+  }
+
+  const cleanUrl = sanitizeFacebookGroupUrl(rawUrl);
+  if (input && cleanUrl) {
+    input.value = cleanUrl;
+  }
+
+  if (!cleanUrl.includes('facebook.com') || (!cleanUrl.includes('/groups/') && !cleanUrl.includes('/share/g/'))) {
+    showToast('Please enter a valid Facebook Group link (e.g. https://web.facebook.com/share/g/...)', 'error');
+    if (input) input.focus();
+    return;
+  }
+
+  // Update UI to running state
+  const btn = document.getElementById('btn-start-fb-scrape');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('opacity-70');
+    btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 mr-2 animate-spin"></i><span>Scraping Facebook Group...</span>';
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  appendConsoleLog(`Initiating scraper job for: ${cleanUrl}`);
+
+  try {
+    const res = await fetch('/api/scraper/start-group', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        groupUrl: cleanUrl,
+        maxPosts: parseInt(maxPosts, 10),
+        maxScrolls: Math.max(10, Math.ceil(parseInt(maxPosts, 10) / 2)),
+        headless: browserMode === 'headless'
+      })
+    }).then(r => r.json());
+
+    if (res.success) {
+      showToast('🚀 Scraper running! Watching live feed in console below...');
+      startScraperPolling();
+    } else {
+      showToast(res.error || 'Failed to start scraper', 'error');
+      resetScraperButton();
+    }
+  } catch (err) {
+    showToast(`Network error: ${err.message}`, 'error');
+    resetScraperButton();
+  }
+}
+
+async function stopActiveScrape() {
+  try {
+    const res = await fetch('/api/scraper/stop', { method: 'POST' }).then(r => r.json());
+    if (res.success) {
+      showToast('Scraper stopped.');
+      appendConsoleLog('Scraper stopped by user request.');
+      resetScraperButton();
+      stopScraperPolling();
+      updateTerminalBadge('Idle', 'bg-slate-800 text-slate-400');
+    }
+  } catch (err) {
+    showToast(`Error stopping scraper: ${err.message}`, 'error');
+  }
+}
+
+function resetScraperButton() {
+  const btn = document.getElementById('btn-start-fb-scrape');
+  if (btn) {
+    btn.disabled = false;
+    btn.classList.remove('opacity-70');
+    btn.innerHTML = '<i data-lucide="play" class="w-4 h-4 mr-2"></i><span>Start Scraping Facebook Group & Extract Leads</span>';
+    if (window.lucide) window.lucide.createIcons();
+  }
+}
+
+async function checkExistingScraperJob() {
+  try {
+    const statusRes = await fetch('/api/scraper/status').then(r => r.json());
+    if (statusRes.success && statusRes.data && statusRes.data.running) {
+      const btn = document.getElementById('btn-start-fb-scrape');
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('opacity-70');
+        btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 mr-2 animate-spin"></i><span>Scraping Facebook Group...</span>';
+        if (window.lucide) window.lucide.createIcons();
+      }
+      startScraperPolling();
+    }
+  } catch (_) {}
+}
+
+function startScraperPolling() {
+  if (scraperPollingInterval) clearInterval(scraperPollingInterval);
+  pollScraperStatus();
+  scraperPollingInterval = setInterval(pollScraperStatus, 1500);
+}
+
+function stopScraperPolling() {
+  if (scraperPollingInterval) {
+    clearInterval(scraperPollingInterval);
+    scraperPollingInterval = null;
+  }
+}
+
+async function pollScraperStatus() {
+  try {
+    const res = await fetch('/api/scraper/status').then(r => r.json());
+    if (!res.success || !res.data) return;
+
+    const data = res.data;
+
+    // 1. Update terminal counter numbers
+    const postsEl = document.getElementById('terminal-posts-count');
+    const phonesEl = document.getElementById('terminal-phones-count');
+    if (postsEl) postsEl.textContent = data.postsFound || 0;
+    if (phonesEl) phonesEl.textContent = data.phonesFound || 0;
+
+    // 2. Render logs into console
+    if (Array.isArray(data.logs)) {
+      renderConsoleLogs(data.logs);
+    }
+
+    // 3. Update status badge
+    if (data.running) {
+      updateTerminalBadge('Running', 'bg-blue-600 text-white animate-pulse');
+    } else if (data.error) {
+      updateTerminalBadge('Error', 'bg-red-600 text-white');
+      resetScraperButton();
+      stopScraperPolling();
+    } else {
+      updateTerminalBadge('Idle', 'bg-slate-800 text-slate-400');
+      resetScraperButton();
+      stopScraperPolling();
+
+      // Scrape completed — refresh leads CRM badge and data
+      fetchLeads(1);
+    }
+  } catch (_) {}
+}
+
+function updateTerminalBadge(text, classNames) {
+  const badge = document.getElementById('terminal-status-badge');
+  if (badge) {
+    badge.textContent = text;
+    badge.className = `px-2 py-0.5 rounded text-[10px] font-bold ${classNames}`;
+  }
+}
+
+function renderConsoleLogs(logs) {
+  const win = document.getElementById('terminal-logs-window');
+  if (!win) return;
+
+  if (logs.length === 0) {
+    win.innerHTML = '<div class="text-slate-500">// Ready. Enter a Facebook Group URL above and click "Start Scraping".</div>';
+    return;
+  }
+
+  win.innerHTML = logs.map(l => {
+    let colorClass = 'text-emerald-400';
+    if (l.includes('❌') || l.includes('Error')) colorClass = 'text-red-400';
+    else if (l.includes('⚠️') || l.includes('Warning') || l.includes('Note')) colorClass = 'text-amber-300';
+    else if (l.includes('🚀') || l.includes('Starting') || l.includes('Connected')) colorClass = 'text-cyan-300';
+    else if (l.includes('🎉') || l.includes('Saved') || l.includes('Finished')) colorClass = 'text-emerald-300 font-bold';
+
+    return `<div class="${colorClass}">${escapeHtml(l)}</div>`;
+  }).join('');
+
+  // Auto-scroll to latest log
+  win.scrollTop = win.scrollHeight;
+}
+
+function appendConsoleLog(msg) {
+  const win = document.getElementById('terminal-logs-window');
+  if (!win) return;
+  const time = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.className = 'text-slate-300';
+  div.textContent = `[${time}] ${msg}`;
+  win.appendChild(div);
+  win.scrollTop = win.scrollHeight;
+}
+
+// ==========================================
+// 2. DIRECT INGEST (FAIL-SAFE TEXT/HTML)
+// ==========================================
+async function pasteClipboardToRawIngest() {
+  try {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) {
+        const textarea = document.getElementById('raw-ingest-content');
+        if (textarea) {
+          textarea.value = text.trim();
+          showToast('Pasted content from clipboard into Direct Ingest!');
+          return;
+        }
+      }
+    }
+  } catch (_) {}
+  const textarea = document.getElementById('raw-ingest-content');
+  if (textarea) {
+    textarea.focus();
+    showToast('Press Ctrl+V to paste content', 'info');
+  }
+}
+
+function clearRawIngest() {
+  const textarea = document.getElementById('raw-ingest-content');
+  if (textarea) textarea.value = '';
+  const card = document.getElementById('raw-ingest-results-card');
+  if (card) card.classList.add('hidden');
+}
+
+async function submitRawIngest() {
+  const textarea = document.getElementById('raw-ingest-content');
+  const rawContent = textarea?.value.trim();
+
+  if (!rawContent) {
+    showToast('Please paste group post text or HTML first.', 'error');
+    if (textarea) textarea.focus();
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit-raw-ingest');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('opacity-70');
+    btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 mr-1.5 animate-spin"></i><span>Extracting Contacts & Saving...</span>';
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  try {
+    const res = await fetch('/api/ingest/raw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rawContent })
+    }).then(r => r.json());
+
+    if (!res.success) {
+      showToast(`Extraction failed: ${res.error}`, 'error');
+      return;
+    }
+
+    const { leadsCreated, leads } = res.data;
+
+    // Render results card
+    const card = document.getElementById('raw-ingest-results-card');
+    const summaryText = document.getElementById('raw-ingest-summary-text');
+    const listEl = document.getElementById('raw-ingest-results-list');
+
+    if (card && summaryText && listEl) {
+      card.classList.remove('hidden');
+      summaryText.textContent = `Extracted ${leadsCreated} lead${leadsCreated === 1 ? '' : 's'} with verified contacts:`;
+
+      if (leads && leads.length > 0) {
+        listEl.innerHTML = leads.map(l => {
+          const waUrl = l.formattedWhatsApp || (l.phoneNumber ? `https://wa.me/${l.phoneNumber.replace(/[^\d]/g, '')}` : null);
+          return `
+            <div class="p-2.5 bg-white rounded-lg border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+              <div class="space-y-0.5">
+                <div class="font-bold text-slate-900 flex items-center space-x-1.5">
+                  <span>${escapeHtml(l.agentName || 'Verified Agent')}</span>
+                  ${l.propertyType ? `<span class="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded text-[10px]">${escapeHtml(l.propertyType)}</span>` : ''}
+                </div>
+                <div class="text-[11px] text-slate-500 flex items-center space-x-2">
+                  <span class="font-mono text-slate-800 font-semibold">${escapeHtml(l.phoneNumber || 'No phone')}</span>
+                  ${l.location ? `<span>&bull; ${escapeHtml(l.location)}</span>` : ''}
+                  ${l.price ? `<span class="text-emerald-700 font-semibold">&bull; ${escapeHtml(l.price)}</span>` : ''}
+                </div>
+              </div>
+              <div class="flex items-center space-x-1.5 shrink-0">
+                ${waUrl ? `
+                  <a href="${waUrl}" target="_blank" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[11px] font-semibold flex items-center">
+                    <i data-lucide="message-circle" class="w-3 h-3 mr-1"></i>WhatsApp
+                  </a>
+                ` : ''}
+                ${l.phoneNumber ? `
+                  <a href="tel:${l.phoneNumber}" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-semibold flex items-center">
+                    <i data-lucide="phone" class="w-3 h-3 mr-1"></i>Call
+                  </a>
+                ` : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
+        if (window.lucide) window.lucide.createIcons();
+      } else {
+        listEl.innerHTML = '<div class="text-slate-400 py-1">No phone numbers detected in the pasted text.</div>';
+      }
+    }
+
+    showToast(`🎉 Extracted & saved ${leadsCreated} lead(s) to CRM database!`);
+
+    // Refresh Leads CRM count and list
+    fetchLeads(1);
+
+  } catch (err) {
+    showToast(`Error extracting contacts: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('opacity-70');
+      btn.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4 mr-1.5"></i><span>Extract Contacts & Save to CRM Database</span>';
+      if (window.lucide) window.lucide.createIcons();
+    }
+  }
+}
+
+// ==========================================
+// 3. LEADS CRM DASHBOARD
 // ==========================================
 function debounceLeadSearch() {
-  clearTimeout(leadSearchDebounceTimer);
+  if (leadSearchDebounceTimer) clearTimeout(leadSearchDebounceTimer);
   leadSearchDebounceTimer = setTimeout(() => {
     fetchLeads(1);
-  }, 250);
-}
-
-async function fetchGroupsForFilter() {
-  try {
-    const res = await fetch('/api/groups').then(r => r.json());
-    if (!res.success) return;
-    const select = document.getElementById('lead-filter-group');
-    if (!select) return;
-
-    const currentVal = select.value;
-    select.innerHTML = '<option value="">All Groups</option>' + res.data.map(g => `
-      <option value="${g.id}">${escapeHtml(g.name || g.url)} (${g.current_leads_count || 0})</option>
-    `).join('');
-    if (currentVal) select.value = currentVal;
-  } catch (err) {
-    console.error('Error fetching groups:', err);
-  }
+  }, 280);
 }
 
 async function fetchLeads(page = 1) {
+  currentLeadsPage = page;
+
+  const search = document.getElementById('lead-search-input')?.value.trim() || '';
+  const status = document.getElementById('lead-filter-status')?.value || '';
+  const hasPhone = document.getElementById('lead-filter-has-phone')?.checked || false;
+  const hasWhatsApp = document.getElementById('lead-filter-has-wa')?.checked || false;
+  const hasEmail = document.getElementById('lead-filter-has-email')?.checked || false;
+
+  const params = new URLSearchParams({
+    page,
+    limit: 15,
+    search,
+    status,
+    hasPhone: hasPhone ? 'true' : '',
+    hasWhatsApp: hasWhatsApp ? 'true' : '',
+    hasEmail: hasEmail ? 'true' : ''
+  });
+
   try {
-    currentLeadsPage = page;
-    const search = document.getElementById('lead-search-input')?.value || '';
-    const groupId = document.getElementById('lead-filter-group')?.value || '';
-    const status = document.getElementById('lead-filter-status')?.value || '';
-    const hasPhone = document.getElementById('lead-filter-has-phone')?.checked || false;
-    const hasWhatsApp = document.getElementById('lead-filter-has-wa')?.checked || false;
-    const hasEmail = document.getElementById('lead-filter-has-email')?.checked || false;
-
-    const params = new URLSearchParams({
-      search,
-      groupId,
-      status,
-      hasPhone,
-      hasWhatsApp,
-      hasEmail,
-      page,
-      limit: 15
-    });
-
     const res = await fetch(`/api/leads?${params}`).then(r => r.json());
     if (!res.success) return;
 
     const { data: leads, pagination } = res;
-    const tbody = document.getElementById('leads-table-body');
-    if (!tbody) return;
+    cachedLeads = leads;
 
-    if (leads.length === 0) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="9" class="px-4 py-8 text-center text-slate-400">
-            No leads match your search criteria. Paste posts in Direct Ingest or scrape a group above!
-          </td>
-        </tr>
-      `;
-      document.getElementById('lead-pagination-info').textContent = 'Showing 0 of 0 leads';
-      document.getElementById('lead-pagination-controls').innerHTML = '';
+    // Update header CRM badge
+    const badge = document.getElementById('nav-leads-badge');
+    if (badge) {
+      badge.textContent = pagination.total || 0;
+    }
+
+    // Render mobile card view and desktop table view
+    renderMobileLeadCards(leads);
+    renderDesktopLeadTable(leads);
+    renderPaginationControls(pagination);
+
+    if (window.lucide) window.lucide.createIcons();
+
+  } catch (err) {
+    console.error('Failed to fetch leads:', err);
+  }
+}
+
+/**
+ * Mobile-First Dedicated Lead Cards (< 768px screens)
+ * Features touch-friendly large buttons, no horizontal overflows, zero text breaks
+ */
+function renderMobileLeadCards(leads) {
+  const container = document.getElementById('leads-cards-container');
+  if (!container) return;
+
+  if (leads.length === 0) {
+    container.innerHTML = `
+      <div class="p-8 text-center text-slate-400 space-y-2">
+        <i data-lucide="inbox" class="w-8 h-8 mx-auto text-slate-300"></i>
+        <p class="text-xs font-medium">No leads match your search or filter.</p>
+        <p class="text-[11px] text-slate-400">Scrape a Facebook Group or paste posts in Direct Ingest to extract leads.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = leads.map(l => {
+    const waUrl = l.formattedWhatsApp || (l.phoneNumber ? `https://wa.me/${l.phoneNumber.replace(/[^\d]/g, '')}` : null);
+    const statusBg = l.status === 'Closed' ? 'bg-slate-100 text-slate-700 border-slate-300' :
+                     l.status === 'Contacted' ? 'bg-blue-50 text-blue-800 border-blue-200' : 
+                     'bg-emerald-50 text-emerald-800 border-emerald-200';
+
+    return `
+      <div class="p-4 space-y-3 bg-white hover:bg-slate-50/50 transition-colors">
+        
+        <!-- Header: Agent Name, Location Pill & Status Selector -->
+        <div class="flex items-start justify-between gap-2">
+          <div class="space-y-0.5">
+            <h3 class="font-bold text-slate-900 text-sm flex items-center">
+              <span class="w-2 h-2 rounded-full ${l.status === 'Closed' ? 'bg-slate-400' : (l.status === 'Contacted' ? 'bg-blue-500' : 'bg-emerald-500')} mr-2 shrink-0"></span>
+              <span class="truncate">${escapeHtml(l.agentName || 'Verified Agent')}</span>
+            </h3>
+            ${l.location ? `
+              <div class="text-[11px] text-slate-600 flex items-center font-medium">
+                <i data-lucide="map-pin" class="w-3 h-3 mr-1 text-slate-400 shrink-0"></i>
+                <span class="truncate">${escapeHtml(l.location)}</span>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Status Dropdown -->
+          <select 
+            onchange="updateLeadStatus('${l.id}', this.value)" 
+            class="text-[11px] font-semibold px-2 py-1 rounded-lg border ${statusBg} focus:outline-none cursor-pointer shrink-0"
+          >
+            <option value="New" ${l.status === 'New' ? 'selected' : ''}>New</option>
+            <option value="Contacted" ${l.status === 'Contacted' ? 'selected' : ''}>Contacted</option>
+            <option value="Closed" ${l.status === 'Closed' ? 'selected' : ''}>Closed</option>
+          </select>
+        </div>
+
+        <!-- Property Badges Row -->
+        <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+          ${l.propertyType ? `
+            <span class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-800 border border-indigo-200 font-semibold">
+              ${escapeHtml(l.propertyType)}
+            </span>
+          ` : ''}
+          ${l.price ? `
+            <span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
+              ${escapeHtml(l.price)}
+            </span>
+          ` : ''}
+          ${l.email ? `
+            <span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] truncate max-w-[180px]">
+              ${escapeHtml(l.email)}
+            </span>
+          ` : ''}
+        </div>
+
+        <!-- Post Snippet -->
+        ${l.postSnippet ? `
+          <p class="text-xs text-slate-600 line-clamp-2 italic bg-slate-50 p-2 rounded-lg border border-slate-100">
+            "${escapeHtml(l.postSnippet)}"
+          </p>
+        ` : ''}
+
+        <!-- 1-Click Touch Action Buttons (WhatsApp & Phone Call) -->
+        <div class="grid grid-cols-2 gap-2 pt-1">
+          ${waUrl ? `
+            <a 
+              href="${waUrl}" 
+              target="_blank" 
+              class="flex items-center justify-center py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+            >
+              <i data-lucide="message-circle" class="w-4 h-4 mr-1.5"></i>
+              <span>WhatsApp</span>
+            </a>
+          ` : `
+            <div class="flex items-center justify-center py-2.5 px-3 bg-slate-100 text-slate-400 rounded-xl text-xs font-medium cursor-not-allowed">
+              <span>No WhatsApp</span>
+            </div>
+          `}
+
+          ${l.phoneNumber ? `
+            <a 
+              href="tel:${l.phoneNumber}" 
+              class="flex items-center justify-center py-2.5 px-3 bg-slate-800 hover:bg-slate-900 active:scale-98 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+            >
+              <i data-lucide="phone" class="w-3.5 h-3.5 mr-1.5"></i>
+              <span>Call (${escapeHtml(l.phoneNumber.slice(-4))})</span>
+            </a>
+          ` : `
+            <div class="flex items-center justify-center py-2.5 px-3 bg-slate-100 text-slate-400 rounded-xl text-xs font-medium cursor-not-allowed">
+              <span>No Phone</span>
+            </div>
+          `}
+        </div>
+
+        <!-- Footer Actions (Edit & Delete) -->
+        <div class="flex items-center justify-between pt-1 border-t border-slate-100 text-[11px] text-slate-400">
+          <span>${formatDate(l.scrapedAt)}</span>
+          <div class="flex items-center space-x-2">
+            <button onclick='openEditLeadModal(${JSON.stringify(l).replace(/'/g, "&apos;")})' class="text-slate-600 hover:text-slate-900 font-medium">Edit</button>
+            <span>&bull;</span>
+            <button onclick="deleteLeadAction('${l.id}')" class="text-red-600 hover:text-red-700 font-medium">Delete</button>
+          </div>
+        </div>
+
+      </div>
+    `;
+  }).join('');
+}
+
+/**
+ * Desktop Lead Table (>= 768px screens)
+ */
+function renderDesktopLeadTable(leads) {
+  const tbody = document.getElementById('leads-table-body');
+  if (!tbody) return;
+
+  if (leads.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" class="px-4 py-10 text-center text-slate-400">
+          No leads match your search criteria. Scrape a Facebook group or paste listings in Direct Ingest above!
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = leads.map(l => {
+    const waUrl = l.formattedWhatsApp || (l.phoneNumber ? `https://wa.me/${l.phoneNumber.replace(/[^\d]/g, '')}` : null);
+    const statusBg = l.status === 'Closed' ? 'border-slate-300 text-slate-600 bg-slate-50' : 
+                     l.status === 'Contacted' ? 'border-blue-300 text-blue-800 bg-blue-50' : 
+                     'border-emerald-300 text-emerald-800 bg-emerald-50';
+
+    return `
+      <tr class="hover:bg-slate-50/80 transition-colors">
+        <!-- 1. Agent Name -->
+        <td class="px-4 py-3">
+          <div class="font-bold text-slate-900 flex items-center">
+            <span class="w-2 h-2 rounded-full ${l.status === 'Closed' ? 'bg-slate-400' : (l.status === 'Contacted' ? 'bg-blue-500' : 'bg-emerald-500')} mr-2 shrink-0"></span>
+            <span>${escapeHtml(l.agentName || 'Verified Agent')}</span>
+          </div>
+          ${l.email ? `
+            <div class="text-[11px] text-slate-400 pl-4 truncate max-w-[160px]">${escapeHtml(l.email)}</div>
+          ` : ''}
+        </td>
+
+        <!-- 2. Phone Number -->
+        <td class="px-4 py-3 font-mono text-xs">
+          ${l.phoneNumber ? `
+            <div class="flex items-center space-x-1.5">
+              <span class="text-slate-800 font-bold">${escapeHtml(l.phoneNumber)}</span>
+              <a href="tel:${l.phoneNumber}" class="text-slate-400 hover:text-blue-600 transition-colors" title="Call">
+                <i data-lucide="phone" class="w-3.5 h-3.5"></i>
+              </a>
+            </div>
+          ` : '<span class="text-slate-400 italic">None</span>'}
+        </td>
+
+        <!-- 3. Property & Price -->
+        <td class="px-4 py-3 text-xs">
+          <div class="font-medium text-slate-800">${escapeHtml(l.propertyType || 'Real Estate Listing')}</div>
+          ${l.price ? `<div class="text-emerald-700 font-bold text-[11px]">${escapeHtml(l.price)}</div>` : ''}
+        </td>
+
+        <!-- 4. Location -->
+        <td class="px-4 py-3 text-xs text-slate-700">
+          ${l.location ? `
+            <span class="inline-flex items-center font-medium">
+              <i data-lucide="map-pin" class="w-3 h-3 mr-1 text-slate-400"></i>${escapeHtml(l.location)}
+            </span>
+          ` : '<span class="text-slate-400 italic">Not specified</span>'}
+        </td>
+
+        <!-- 5. WhatsApp Action -->
+        <td class="px-4 py-3">
+          ${waUrl ? `
+            <a 
+              href="${waUrl}" 
+              target="_blank" 
+              class="inline-flex items-center px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 font-semibold text-xs shadow-xs transition-all"
+            >
+              <i data-lucide="message-circle" class="w-3.5 h-3.5 mr-1 text-emerald-600"></i>Chat on WhatsApp
+            </a>
+          ` : '<span class="text-slate-400 text-xs italic">No WhatsApp</span>'}
+        </td>
+
+        <!-- 6. Status Selector -->
+        <td class="px-4 py-3">
+          <select 
+            onchange="updateLeadStatus('${l.id}', this.value)" 
+            class="text-xs font-semibold px-2 py-1 rounded-lg border ${statusBg} focus:outline-none cursor-pointer"
+          >
+            <option value="New" ${l.status === 'New' ? 'selected' : ''}>New</option>
+            <option value="Contacted" ${l.status === 'Contacted' ? 'selected' : ''}>Contacted</option>
+            <option value="Closed" ${l.status === 'Closed' ? 'selected' : ''}>Closed</option>
+          </select>
+        </td>
+
+        <!-- 7. Actions -->
+        <td class="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+          <button 
+            onclick='openEditLeadModal(${JSON.stringify(l).replace(/'/g, "&apos;")})' 
+            class="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
+            title="Edit Lead"
+          >
+            <i data-lucide="edit-2" class="w-4 h-4"></i>
+          </button>
+          <button 
+            onclick="deleteLeadAction('${l.id}')" 
+            class="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors cursor-pointer" 
+            title="Delete Lead"
+          >
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderPaginationControls(pagination) {
+  const infoEl = document.getElementById('lead-pagination-info');
+  const controlsEl = document.getElementById('lead-pagination-controls');
+
+  if (infoEl) {
+    const from = pagination.total === 0 ? 0 : (pagination.page - 1) * pagination.limit + 1;
+    const to = Math.min(pagination.page * pagination.limit, pagination.total);
+    infoEl.textContent = `Showing ${from}–${to} of ${pagination.total} leads`;
+  }
+
+  if (controlsEl) {
+    if (pagination.pages <= 1) {
+      controlsEl.innerHTML = '';
       return;
     }
 
-    tbody.innerHTML = leads.map(l => {
-      const waUrl = l.formattedWhatsApp || (l.phoneNumber ? `https://wa.me/${l.phoneNumber.replace(/[^\d]/g, '')}` : null);
-      return `
-        <tr class="hover:bg-slate-50 transition-colors">
-          <td class="px-4 py-3">
-            <div class="font-bold text-slate-900 flex items-center">
-              <span class="w-2 h-2 rounded-full ${l.status === 'Closed' ? 'bg-slate-400' : (l.status === 'Contacted' ? 'bg-blue-500' : 'bg-emerald-500')} mr-2"></span>
-              ${escapeHtml(l.agentName || 'Verified Agent')}
-            </div>
-          </td>
-          <td class="px-4 py-3 font-mono text-xs">
-            ${l.phoneNumber ? `
-              <div class="flex items-center space-x-1.5">
-                <span class="text-slate-800 font-semibold">${escapeHtml(l.phoneNumber)}</span>
-                <a href="tel:${l.phoneNumber}" class="text-slate-400 hover:text-blue-600" title="Call">
-                  <i data-lucide="phone" class="w-3.5 h-3.5"></i>
-                </a>
-              </div>
-            ` : '<span class="text-slate-400 italic">None</span>'}
-          </td>
-          <td class="px-4 py-3">
-            ${waUrl ? `
-              <a href="${waUrl}" target="_blank" class="inline-flex items-center px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 font-semibold text-xs shadow-sm transition-all" title="Open WhatsApp chat">
-                <i data-lucide="message-circle" class="w-3.5 h-3.5 mr-1 text-emerald-600"></i>Chat on WhatsApp
-              </a>
-            ` : '<span class="text-slate-400 text-xs italic">No WhatsApp</span>'}
-          </td>
-          <td class="px-4 py-3 text-xs">
-            ${l.email ? `
-              <a href="mailto:${l.email}" class="text-blue-600 hover:underline flex items-center">
-                <i data-lucide="mail" class="w-3.5 h-3.5 mr-1 text-slate-400"></i>${escapeHtml(l.email)}
-              </a>
-            ` : '<span class="text-slate-400 italic">None</span>'}
-          </td>
-          <td class="px-4 py-3 text-xs text-slate-600">
-            <span class="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-700 truncate max-w-[140px]" title="${escapeHtml(l.groupName || l.groupUrl || 'Facebook Group')}">
-              ${escapeHtml(l.groupName || 'Facebook Group')}
-            </span>
-          </td>
-          <td class="px-4 py-3 text-xs text-slate-600 max-w-xs">
-            <div class="line-clamp-2" title="${escapeHtml(l.postSnippet || '')}">
-              ${escapeHtml(l.postSnippet || '—')}
-            </div>
-          </td>
-          <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
-            ${formatDate(l.scrapedAt)}
-          </td>
-          <td class="px-4 py-3 text-center">
-            <select onchange="updateLeadStatus('${l.id}', this.value)" class="text-xs font-semibold px-2 py-1 rounded-lg border ${l.status === 'Closed' ? 'border-slate-300 text-slate-600 bg-slate-50' : (l.status === 'Contacted' ? 'border-blue-300 text-blue-800 bg-blue-50' : 'border-emerald-300 text-emerald-800 bg-emerald-50')} focus:outline-none cursor-pointer">
-              <option value="New" ${l.status === 'New' ? 'selected' : ''}>New</option>
-              <option value="Contacted" ${l.status === 'Contacted' ? 'selected' : ''}>Contacted</option>
-              <option value="Closed" ${l.status === 'Closed' ? 'selected' : ''}>Closed</option>
-            </select>
-          </td>
-          <td class="px-4 py-3 text-right space-x-1 whitespace-nowrap">
-            <button onclick='openEditLeadModal(${JSON.stringify(l).replace(/'/g, "&apos;")})' class="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer" title="Edit Lead">
-              <i data-lucide="edit-2" class="w-4 h-4"></i>
-            </button>
-            <button onclick="deleteLeadAction('${l.id}')" class="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 cursor-pointer" title="Delete Lead">
-              <i data-lucide="trash-2" class="w-4 h-4"></i>
-            </button>
-          </td>
-        </tr>
-      `;
-    }).join('');
-
-    // Pagination info & controls
-    document.getElementById('lead-pagination-info').textContent = `Showing ${leads.length} of ${pagination.total} leads (Page ${pagination.page} of ${pagination.totalPages || 1})`;
-
-    let paginationHtml = '';
+    let buttons = '';
     if (pagination.page > 1) {
-      paginationHtml += `<button onclick="fetchLeads(${pagination.page - 1})" class="px-2.5 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50 cursor-pointer">&larr; Prev</button>`;
+      buttons += `<button onclick="fetchLeads(${pagination.page - 1})" class="px-2.5 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 text-xs font-semibold">&larr; Prev</button>`;
     }
-    if (pagination.page < pagination.totalPages) {
-      paginationHtml += `<button onclick="fetchLeads(${pagination.page + 1})" class="px-2.5 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50 cursor-pointer">Next &rarr;</button>`;
+    buttons += `<span class="px-2 text-xs font-bold text-slate-700">Page ${pagination.page} of ${pagination.pages}</span>`;
+    if (pagination.page < pagination.pages) {
+      buttons += `<button onclick="fetchLeads(${pagination.page + 1})" class="px-2.5 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 text-xs font-semibold">Next &rarr;</button>`;
     }
-    document.getElementById('lead-pagination-controls').innerHTML = paginationHtml;
-
-    lucide.createIcons();
-  } catch (err) {
-    console.error('Failed to fetch leads:', err);
+    controlsEl.innerHTML = buttons;
   }
 }
 
@@ -388,10 +858,9 @@ async function updateLeadStatus(leadId, newStatus) {
     }).then(r => r.json());
 
     if (res.success) {
-      showToast(`Lead status updated to ${newStatus}`, 'success');
-      fetchDashboardStats();
+      showToast(`Status updated to "${newStatus}"`);
     } else {
-      showToast(`Failed: ${res.error}`, 'error');
+      showToast(res.error || 'Failed to update status', 'error');
     }
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
@@ -400,62 +869,46 @@ async function updateLeadStatus(leadId, newStatus) {
 
 async function deleteLeadAction(leadId) {
   if (!confirm('Are you sure you want to delete this lead?')) return;
+
   try {
     const res = await fetch(`/api/leads/${leadId}`, { method: 'DELETE' }).then(r => r.json());
     if (res.success) {
-      showToast('Lead deleted successfully.', 'success');
+      showToast('Lead deleted.');
       fetchLeads(currentLeadsPage);
-      fetchDashboardStats();
     } else {
-      showToast(`Failed: ${res.error}`, 'error');
+      showToast(res.error || 'Failed to delete lead', 'error');
     }
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
   }
 }
 
-function exportLeadsCsv() {
-  const search = document.getElementById('lead-search-input')?.value || '';
-  const groupId = document.getElementById('lead-filter-group')?.value || '';
-  const status = document.getElementById('lead-filter-status')?.value || '';
-  const hasPhone = document.getElementById('lead-filter-has-phone')?.checked || false;
-  const hasWhatsApp = document.getElementById('lead-filter-has-wa')?.checked || false;
-  const hasEmail = document.getElementById('lead-filter-has-email')?.checked || false;
-
-  const params = new URLSearchParams({
-    search,
-    groupId,
-    status,
-    hasPhone,
-    hasWhatsApp,
-    hasEmail
-  });
-
-  showToast('Generating CSV file download...', 'info');
-  window.location.href = `/api/leads/export/csv?${params}`;
-}
-
+// Modal: Add / Edit Lead
 function openAddLeadModal() {
   document.getElementById('lead-modal-title').textContent = 'Add New Lead';
   document.getElementById('lead-modal-id').value = '';
   document.getElementById('lead-modal-name').value = '';
   document.getElementById('lead-modal-phone').value = '';
   document.getElementById('lead-modal-whatsapp').value = '';
-  document.getElementById('lead-modal-email').value = '';
-  document.getElementById('lead-modal-snippet').value = '';
+  document.getElementById('lead-modal-property-type').value = '';
+  document.getElementById('lead-modal-location').value = '';
+  document.getElementById('lead-modal-price').value = '';
   document.getElementById('lead-modal-status').value = 'New';
+  document.getElementById('lead-modal-snippet').value = '';
   openModal('leadModal');
 }
 
 function openEditLeadModal(lead) {
   document.getElementById('lead-modal-title').textContent = 'Edit Lead';
-  document.getElementById('lead-modal-id').value = lead.id;
+  document.getElementById('lead-modal-id').value = lead.id || '';
   document.getElementById('lead-modal-name').value = lead.agentName || '';
   document.getElementById('lead-modal-phone').value = lead.phoneNumber || '';
   document.getElementById('lead-modal-whatsapp').value = lead.formattedWhatsApp || '';
-  document.getElementById('lead-modal-email').value = lead.email || '';
-  document.getElementById('lead-modal-snippet').value = lead.postSnippet || '';
+  document.getElementById('lead-modal-property-type').value = lead.propertyType || '';
+  document.getElementById('lead-modal-location').value = lead.location || '';
+  document.getElementById('lead-modal-price').value = lead.price || '';
   document.getElementById('lead-modal-status').value = lead.status || 'New';
+  document.getElementById('lead-modal-snippet').value = lead.postSnippet || '';
   openModal('leadModal');
 }
 
@@ -464,1581 +917,141 @@ async function submitLeadModalForm() {
   const agentName = document.getElementById('lead-modal-name').value.trim();
   const phoneNumber = document.getElementById('lead-modal-phone').value.trim();
   const formattedWhatsApp = document.getElementById('lead-modal-whatsapp').value.trim();
-  const email = document.getElementById('lead-modal-email').value.trim();
-  const postSnippet = document.getElementById('lead-modal-snippet').value.trim();
+  const propertyType = document.getElementById('lead-modal-property-type').value.trim();
+  const location = document.getElementById('lead-modal-location').value.trim();
+  const price = document.getElementById('lead-modal-price').value.trim();
   const status = document.getElementById('lead-modal-status').value;
+  const postSnippet = document.getElementById('lead-modal-snippet').value.trim();
 
-  if (!agentName && !phoneNumber) {
-    showToast('Please provide an agent name or phone number.', 'error');
+  if (!agentName) {
+    showToast('Agent Name is required', 'error');
+    document.getElementById('lead-modal-name').focus();
     return;
   }
 
-  const payload = { agentName, phoneNumber, formattedWhatsApp, email, postSnippet, status };
+  const payload = {
+    agentName,
+    phoneNumber,
+    formattedWhatsApp,
+    propertyType,
+    location,
+    price,
+    status,
+    postSnippet
+  };
+
   try {
-    let res;
-    if (id) {
-      res = await fetch(`/api/leads/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }).then(r => r.json());
-    } else {
-      res = await fetch('/api/leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }).then(r => r.json());
-    }
+    const isEdit = Boolean(id);
+    const url = isEdit ? `/api/leads/${id}` : '/api/leads';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(r => r.json());
 
     if (res.success) {
-      showToast(id ? 'Lead updated successfully.' : 'Lead created successfully.', 'success');
+      showToast(isEdit ? 'Lead updated successfully!' : 'Lead created successfully!');
       closeModal('leadModal');
       fetchLeads(currentLeadsPage);
-      fetchDashboardStats();
     } else {
-      showToast(`Failed: ${res.error}`, 'error');
+      showToast(res.error || 'Failed to save lead', 'error');
     }
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
   }
 }
 
-// ==========================================
-// DIRECT INGEST (FAIL-SAFE FALLBACK)
-// ==========================================
-function clearRawIngest() {
-  document.getElementById('raw-ingest-content').value = '';
-  document.getElementById('raw-ingest-results-card').classList.add('hidden');
+// Export Leads to CSV (real downloadable .csv file)
+function exportLeadsCsv() {
+  showToast('Generating CSV export file...', 'info');
+  window.location.href = '/api/leads/export/csv';
 }
 
-async function pasteClipboardToRawIngest() {
-  try {
-    const text = await navigator.clipboard.readText();
-    document.getElementById('raw-ingest-content').value = text;
-    showToast('Pasted content from clipboard.', 'info');
-  } catch (err) {
-    showToast('Please use Ctrl+V to paste.', 'info');
-  }
-}
-
-async function submitRawIngest() {
-  const rawContent = document.getElementById('raw-ingest-content').value.trim();
-  const groupName = document.getElementById('raw-ingest-group-name').value.trim();
-  const groupUrl = document.getElementById('raw-ingest-group-url').value.trim();
-
-  if (!rawContent) {
-    showToast('Please paste raw post text or HTML first.', 'error');
-    return;
-  }
-
-  const btn = document.getElementById('btn-submit-raw-ingest');
-  const originalText = btn.innerHTML;
-  btn.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Parsing Contacts & Saving...';
-  btn.disabled = true;
-
-  try {
-    const res = await fetch('/api/ingest/raw', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rawContent, groupName, groupUrl })
-    }).then(r => r.json());
-
-    if (!res.success) {
-      showToast(`Ingestion error: ${res.error}`, 'error');
-      return;
-    }
-
-    const { leadsCreated, leads } = res.data;
-    showToast(`Extracted ${leadsCreated} agent leads successfully!`, 'success');
-
-    const card = document.getElementById('raw-ingest-results-card');
-    const summaryText = document.getElementById('raw-ingest-summary-text');
-    const tbody = document.getElementById('raw-ingest-results-body');
-
-    summaryText.textContent = `Extracted and saved ${leadsCreated} contacts to CRM.`;
-    card.classList.remove('hidden');
-
-    if (leads.length === 0) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="5" class="px-4 py-4 text-center text-slate-400">
-            No phone numbers or contact details were detected in the pasted text.
-          </td>
-        </tr>
-      `;
-    } else {
-      tbody.innerHTML = leads.map(l => {
-        const waUrl = l.formattedWhatsApp || (l.phoneNumber ? `https://wa.me/${l.phoneNumber.replace(/[^\d]/g, '')}` : null);
-        return `
-          <tr class="hover:bg-slate-50 text-xs">
-            <td class="px-4 py-2.5 font-bold text-slate-900">${escapeHtml(l.agentName || 'Verified Agent')}</td>
-            <td class="px-4 py-2.5 font-mono text-emerald-700 font-semibold">${escapeHtml(l.phoneNumber || 'None')}</td>
-            <td class="px-4 py-2.5 text-slate-600">${escapeHtml(l.email || 'None')}</td>
-            <td class="px-4 py-2.5 text-slate-500 max-w-xs truncate">${escapeHtml(l.postSnippet || '')}</td>
-            <td class="px-4 py-2.5 text-right">
-              ${waUrl ? `
-                <a href="${waUrl}" target="_blank" class="inline-flex items-center px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] shadow">
-                  <i data-lucide="message-circle" class="w-3 h-3 mr-1"></i>Chat on WhatsApp
-                </a>
-              ` : '<span class="text-slate-400 italic">No WhatsApp</span>'}
-            </td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    lucide.createIcons();
-    fetchLeads(1);
-    fetchDashboardStats();
-    fetchGroupsForFilter();
-
-  } catch (err) {
-    showToast(`Failed: ${err.message}`, 'error');
-  } finally {
-    btn.innerHTML = originalText;
-    btn.disabled = false;
-  }
-}
-
-// ==========================================
-// 2. AGENTS DIRECTORY & TABLE
-// ==========================================
-function debounceSearch() {
-  clearTimeout(searchDebounceTimer);
-  searchDebounceTimer = setTimeout(() => {
-    fetchAgents(1);
-  }, 250);
-}
-
-async function fetchAgents(page = 1) {
-  try {
-    currentAgentsPage = page;
-    const search = document.getElementById('agent-search-input')?.value || '';
-    const city = document.getElementById('agent-filter-city')?.value || '';
-    const status = document.getElementById('agent-filter-status')?.value || '';
-    const role = document.getElementById('agent-filter-role')?.value || '';
-    const min_score = document.getElementById('agent-filter-score')?.value || '0';
-
-    const params = new URLSearchParams({
-      search,
-      city,
-      status,
-      role,
-      min_score,
-      page,
-      limit: 15
-    });
-
-    const res = await fetch(`/api/agents?${params}`).then(r => r.json());
-    if (!res.success) return;
-
-    const { data: agents, pagination } = res;
-    const tbody = document.getElementById('agents-table-body');
-
-    if (agents.length === 0) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="8" class="px-4 py-8 text-center text-slate-400">
-            No agent leads match your current search/filters.
-          </td>
-        </tr>
-      `;
-      document.getElementById('pagination-info').textContent = 'Showing 0 of 0 leads';
-      document.getElementById('pagination-controls').innerHTML = '';
-      return;
-    }
-
-    tbody.innerHTML = agents.map(a => `
-      <tr class="hover:bg-slate-50 transition-colors">
-        <td class="px-4 py-3">
-          <div class="font-bold text-slate-900 cursor-pointer hover:text-emerald-700" onclick="openAgentDetailModal('${a.id}')">
-            ${escapeHtml(a.name)}
-          </div>
-          <div class="text-xs text-slate-500 font-mono mt-0.5">${escapeHtml(a.primary_phone)}</div>
-        </td>
-        <td class="px-4 py-3 text-xs">
-          <div class="font-medium text-slate-800">${escapeHtml(a.primary_city || 'Unknown')}</div>
-          <div class="text-slate-400">${escapeHtml(a.primary_location || '—')}</div>
-        </td>
-        <td class="px-4 py-3 text-xs text-slate-700">
-          <span class="font-medium">${escapeHtml(a.likely_role)}</span>
-        </td>
-        <td class="px-4 py-3 text-center font-bold text-slate-800 text-xs">
-          ${a.advertisements_count}
-        </td>
-        <td class="px-4 py-3 text-center">
-          <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold ${getScoreBadgeClass(a.lead_score)}">
-            ${a.lead_score}
-          </span>
-        </td>
-        <td class="px-4 py-3 text-xs">
-          <span class="inline-block px-2.5 py-0.5 rounded-full font-semibold ${getStatusBadgeClass(a.status)}">
-            ${escapeHtml(a.status)}
-          </span>
-        </td>
-        <td class="px-4 py-3 text-xs text-slate-500">
-          ${formatDate(a.last_active_at)}
-        </td>
-        <td class="px-4 py-3 text-right space-x-1 whitespace-nowrap">
-          <button onclick="openAgentDetailModal('${a.id}')" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900" title="View Details">
-            <i data-lucide="eye" class="w-4 h-4"></i>
-          </button>
-          <a href="https://wa.me/${cleanPhoneForWa(a.whatsapp_phone || a.primary_phone)}" target="_blank" class="inline-block p-1.5 rounded-lg hover:bg-emerald-50 text-emerald-600 hover:text-emerald-700" title="Chat on WhatsApp">
-            <i data-lucide="message-circle" class="w-4 h-4"></i>
-          </a>
-          <a href="tel:${a.primary_phone}" class="inline-block p-1.5 rounded-lg hover:bg-blue-50 text-blue-600 hover:text-blue-700" title="Call Phone">
-            <i data-lucide="phone" class="w-4 h-4"></i>
-          </a>
-        </td>
-      </tr>
-    `).join('');
-
-    // Pagination info & controls
-    document.getElementById('pagination-info').textContent = `Showing ${agents.length} of ${pagination.total} leads (Page ${pagination.page} of ${pagination.totalPages || 1})`;
-
-    let paginationHtml = '';
-    if (pagination.page > 1) {
-      paginationHtml += `<button onclick="fetchAgents(${pagination.page - 1})" class="px-2.5 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50">&larr; Prev</button>`;
-    }
-    if (pagination.page < pagination.totalPages) {
-      paginationHtml += `<button onclick="fetchAgents(${pagination.page + 1})" class="px-2.5 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50">Next &rarr;</button>`;
-    }
-    document.getElementById('pagination-controls').innerHTML = paginationHtml;
-
-    lucide.createIcons();
-  } catch (err) {
-    console.error('Failed to fetch agents:', err);
-  }
-}
-
-// ==========================================
-// 3. AGENT DETAILS & OUTREACH MODAL
-// ==========================================
-async function openAgentDetailModal(agentId) {
-  try {
-    currentAgentDetailId = agentId;
-    const res = await fetch(`/api/agents/${agentId}`).then(r => r.json());
-    if (!res.success) return;
-
-    const { agent, advertisements, outreachLogs } = res.data;
-
-    document.getElementById('modal-agent-name').textContent = agent.name;
-    document.getElementById('modal-agent-avatar').textContent = agent.name.slice(0, 2).toUpperCase();
-    document.getElementById('modal-agent-phones').textContent = `${agent.primary_phone} ${agent.secondary_phone ? '• Alt: ' + agent.secondary_phone : ''} • ${agent.primary_city || 'Unknown'}`;
-    
-    // Status & score badges
-    const scoreBadge = document.getElementById('modal-agent-score-badge');
-    scoreBadge.textContent = `Score: ${agent.lead_score}/100`;
-    scoreBadge.className = `px-2 py-0.5 rounded-full text-xs font-bold ${getScoreBadgeClass(agent.lead_score)}`;
-
-    const statusBadge = document.getElementById('modal-agent-status-badge');
-    statusBadge.textContent = agent.status;
-    statusBadge.className = `px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusBadgeClass(agent.status)}`;
-
-    document.getElementById('modal-role-text').textContent = agent.likely_role;
-
-    // Score justification breakdown
-    let breakdownObj = {};
-    try {
-      breakdownObj = JSON.parse(agent.score_breakdown || '{}');
-    } catch (_) {}
-
-    document.getElementById('modal-score-explanation').innerHTML = `
-      <strong>Score Factors:</strong> 
-      Volume (+${breakdownObj.volumeScore || 0}), 
-      Recency (+${breakdownObj.recencyScore || 0}), 
-      Portfolio Diversity (+${breakdownObj.diversityScore || 0}), 
-      Contact Completeness (+${breakdownObj.completenessScore || 0}), 
-      Target Hub (+${breakdownObj.targetCityScore || 0}).
-      <br><span class="text-slate-500">${agent.notes ? 'Notes: ' + escapeHtml(agent.notes) : ''}</span>
-    `;
-
-    // WhatsApp & Call Buttons
-    const waPhone = cleanPhoneForWa(agent.whatsapp_phone || agent.primary_phone);
-    document.getElementById('modal-whatsapp-btn').href = `https://wa.me/${waPhone}?text=${encodeURIComponent(`Hello ${agent.name}, I am reaching out from Locari Nigeria regarding your property listings.`)}`;
-    document.getElementById('modal-call-btn').href = `tel:${agent.primary_phone}`;
-
-    // Locari Sync button state
-    const syncBtn = document.getElementById('modal-sync-locari-btn');
-    if (agent.status === 'Registered on Locari') {
-      syncBtn.disabled = true;
-      syncBtn.className = 'bg-slate-100 text-slate-400 font-semibold px-3 py-2 rounded-lg text-xs cursor-not-allowed';
-      syncBtn.innerHTML = '<i data-lucide="check" class="w-3.5 h-3.5 mr-1.5 inline"></i>Registered on Locari';
-    } else {
-      syncBtn.disabled = false;
-      syncBtn.className = 'bg-purple-600 hover:bg-purple-700 text-white font-semibold px-3 py-2 rounded-lg text-xs flex items-center transition-all shadow-sm';
-      syncBtn.innerHTML = '<i data-lucide="check-circle" class="w-3.5 h-3.5 mr-1.5 inline"></i>Sync to Locari Platform';
-    }
-
-    // Do Not Contact button
-    const dncBtn = document.getElementById('modal-dnc-btn');
-    if (agent.do_not_contact === 1) {
-      dncBtn.className = 'bg-red-600 text-white font-semibold px-3 py-2 rounded-lg text-xs flex items-center transition-all ml-auto';
-      dncBtn.innerHTML = '<i data-lucide="ban" class="w-3.5 h-3.5 mr-1.5 inline"></i>On Do-Not-Contact List';
-    } else {
-      dncBtn.className = 'bg-slate-100 hover:bg-red-50 hover:text-red-700 text-slate-700 font-semibold px-3 py-2 rounded-lg border border-slate-200 text-xs flex items-center transition-all ml-auto';
-      dncBtn.innerHTML = '<i data-lucide="ban" class="w-3.5 h-3.5 mr-1.5 inline"></i>Do Not Contact';
-    }
-
-    // Render Advertisements
-    document.getElementById('modal-ads-count').textContent = advertisements.length;
-    const adsContainer = document.getElementById('modal-ads-list');
-    if (advertisements.length === 0) {
-      adsContainer.innerHTML = '<div class="text-xs text-slate-400 py-2">No advertisements recorded.</div>';
-    } else {
-      adsContainer.innerHTML = advertisements.map(ad => `
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-xs">
-          <div class="flex items-center justify-between">
-            <span class="font-bold text-slate-800">${escapeHtml(ad.property_type)} • <span class="text-emerald-700">${ad.rent_amount ? formatNaira(ad.rent_amount) : 'Price on request'}</span></span>
-            <span class="text-[11px] text-slate-400">${formatDate(ad.posted_at || ad.collected_at)}</span>
-          </div>
-          <p class="text-slate-600 whitespace-pre-wrap font-sans text-xs">${escapeHtml(ad.raw_text)}</p>
-          <div class="flex items-center justify-between text-[11px] text-slate-500 pt-1">
-            <span>Source: <strong>${escapeHtml(ad.source_name || 'Direct Import')}</strong></span>
-            ${ad.original_post_url ? `<a href="${ad.original_post_url}" target="_blank" class="text-emerald-600 hover:underline">View original post &rarr;</a>` : ''}
-          </div>
-        </div>
-      `).join('');
-    }
-
-    // Render Outreach Timeline
-    const timeline = document.getElementById('modal-outreach-timeline');
-    if (outreachLogs.length === 0) {
-      timeline.innerHTML = '<div class="text-xs text-slate-400 py-2">No communication logged yet. Use the form above to log calls or chats.</div>';
-    } else {
-      timeline.innerHTML = outreachLogs.map(log => `
-        <div class="p-2.5 bg-slate-50 border-l-2 border-emerald-500 rounded-r-lg space-y-1">
-          <div class="flex items-center justify-between text-slate-700 font-semibold text-xs">
-            <span>${escapeHtml(log.channel)} • ${escapeHtml(log.outcome)}</span>
-            <span class="text-[10px] text-slate-400 font-normal">${formatDate(log.contacted_at)}</span>
-          </div>
-          <p class="text-slate-600 text-[11px]">${escapeHtml(log.notes || 'No notes')}</p>
-          ${log.follow_up_date ? `<div class="text-[10px] text-amber-700 font-medium">Follow-up: ${log.follow_up_date}</div>` : ''}
-        </div>
-      `).join('');
-    }
-
-    openModal('agentDetailModal');
-    lucide.createIcons();
-  } catch (err) {
-    console.error('Failed to open agent detail:', err);
-  }
-}
-
-// Submit communication log
-async function submitOutreachLog() {
-  if (!currentAgentDetailId) return;
-
-  const channel = document.getElementById('outreach-channel').value;
-  const outcome = document.getElementById('outreach-outcome').value;
-  const follow_up_date = document.getElementById('outreach-followup-date').value || null;
-  const notes = document.getElementById('outreach-notes').value.trim();
-
-  try {
-    const res = await fetch(`/api/agents/${currentAgentDetailId}/outreach`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        channel,
-        outcome,
-        follow_up_date,
-        notes,
-        conducted_by: 'Locari Scout'
-      })
-    }).then(r => r.json());
-
-    if (res.success) {
-      showToast('✅ Outreach activity successfully logged!');
-      document.getElementById('outreach-notes').value = '';
-      openAgentDetailModal(currentAgentDetailId);
-      if (currentTab === 'agents') fetchAgents(currentAgentsPage);
-      if (currentTab === 'dashboard') fetchDashboardStats();
-    } else {
-      showToast(res.error || 'Failed to log outreach', 'error');
-    }
-  } catch (err) {
-    showToast('Failed to save outreach log', 'error');
-  }
-}
-
-// Sync to Locari platform
-async function syncCurrentAgentToLocari() {
-  if (!currentAgentDetailId) return;
-  if (!confirm('Sync this agent directly to Locari platform as a verified registered agent?')) return;
-
-  try {
-    const res = await fetch(`/api/locari/sync/${currentAgentDetailId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    }).then(r => r.json());
-
-    if (res.success) {
-      showToast('🎉 Agent registered and synced to Locari platform!');
-      openAgentDetailModal(currentAgentDetailId);
-      if (currentTab === 'agents') fetchAgents(currentAgentsPage);
-      if (currentTab === 'dashboard') fetchDashboardStats();
-    } else {
-      showToast(res.error || 'Failed to sync to Locari', 'error');
-    }
-  } catch (err) {
-    showToast('Failed to sync to Locari', 'error');
-  }
-}
-
-// Toggle Do Not Contact
-async function toggleDoNotContact() {
-  if (!currentAgentDetailId) return;
-  const confirmToggle = confirm('Are you sure you want to toggle the Do-Not-Contact compliance status for this lead?');
-  if (!confirmToggle) return;
-
-  try {
-    const res = await fetch(`/api/agents/${currentAgentDetailId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ do_not_contact: 1 })
-    }).then(r => r.json());
-
-    if (res.success) {
-      showToast('Lead marked as Do-Not-Contact');
-      openAgentDetailModal(currentAgentDetailId);
-      if (currentTab === 'agents') fetchAgents(currentAgentsPage);
-    }
-  } catch (err) {
-    showToast('Failed to update status', 'error');
-  }
-}
-
-// ==========================================
-// 4. INGESTION STUDIO
-// ==========================================
-function loadSampleListings() {
-  const sample = `*DIRECT BRIEF IN OLD BODIJA, IBADAN*
-Newly built 2 bedroom flat, all rooms ensuite with visitor toilet.
-Fenced & gated, running borehole, pop ceiling, dedicated prepaid meter.
-Rent: ₦1,200,000 per annum.
-Caution: 100k. Agency & Legal: 10%.
-Inspection fee: ₦3,000.
-Call or WhatsApp: 0803 123 4567
-
----
-
-*LEKKI PHASE 1 LUXURY APARTMENT*
-Executive 3 bedroom serviced flat with 24/7 power, elevator, and swimming pool.
-Rent: 5.5m per annum.
-Direct brief.
-Contact Agent Segun on 0812 345 6789 or wa.me/2348123456789
-
----
-
-*DECENT ROOM & PARLOUR AT AKOBO IBADAN*
-Decent room and parlour self contain, borehole water, compound fully paved.
-Rent: 450k per year.
-Inspection fee applies.
-Call Realtor Biodun: 0905 555 4433`;
-
-  document.getElementById('quick-paste-text').value = sample;
-}
-
-async function previewQuickPaste() {
-  const rawText = document.getElementById('quick-paste-text').value.trim();
-  const sourceId = document.getElementById('quick-paste-source').value || null;
-
-  if (!rawText) {
-    showToast('Please paste at least one property advertisement text.', 'error');
+// Reset entire database
+async function confirmResetDatabase() {
+  if (!confirm('⚠️ Are you sure you want to delete ALL discovered leads and start completely fresh? This will wipe the database to 0 records.')) {
     return;
   }
 
   try {
-    const res = await fetch('/api/ingest/preview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rawText, sourceId })
-    }).then(r => r.json());
-
-    if (!res.success) {
-      showToast(res.error || 'Preview failed', 'error');
-      return;
-    }
-
-    const { totalSegments, validContactsCount, missingContactsCount, items } = res.data;
-    const box = document.getElementById('quick-paste-preview-box');
-    const badge = document.getElementById('preview-counts-badge');
-    const list = document.getElementById('preview-items-list');
-
-    box.classList.remove('hidden');
-    badge.textContent = `${validContactsCount} valid contacts found / ${totalSegments} post(s)`;
-
-    list.innerHTML = items.map((item, idx) => `
-      <div class="p-3 rounded-lg border ${item.hasContact ? 'border-emerald-200 bg-emerald-50/40' : 'border-amber-200 bg-amber-50/40'} text-xs space-y-1">
-        <div class="flex items-center justify-between">
-          <span class="font-bold text-slate-800">#${idx + 1}: ${escapeHtml(item.propertyType)}</span>
-          <span class="font-bold ${item.hasContact ? 'text-emerald-700' : 'text-amber-700'}">
-            ${item.hasContact ? 'Phone: ' + item.primaryPhone : '⚠️ No Phone Found'}
-          </span>
-        </div>
-        <div class="text-slate-600">
-          Location: <strong>${escapeHtml(item.neighbourhood ? item.neighbourhood + ', ' + item.city : item.city)}</strong> • 
-          Rent: <strong>${item.rentAmount ? formatNaira(item.rentAmount) : 'Unspecified'}</strong>
-        </div>
-      </div>
-    `).join('');
-
-    lucide.createIcons();
-  } catch (err) {
-    showToast('Error generating preview', 'error');
-  }
-}
-
-async function submitQuickPaste() {
-  const rawText = document.getElementById('quick-paste-text').value.trim();
-  const sourceId = document.getElementById('quick-paste-source').value || null;
-
-  if (!rawText) {
-    showToast('Please paste post text to ingest.', 'error');
-    return;
-  }
-
-  try {
-    const res = await fetch('/api/ingest/quick-paste', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rawText, sourceId })
-    }).then(r => r.json());
-
+    const res = await fetch('/api/database/reset', { method: 'POST' }).then(r => r.json());
     if (res.success) {
-      const { postsImported, duplicatesDetected, agentsCreated, agentsUpdated } = res.data;
-      showToast(`✅ Ingested ${postsImported} posts! Created ${agentsCreated} new agents, updated ${agentsUpdated}. (${duplicatesDetected} duplicates ignored).`);
-      document.getElementById('quick-paste-text').value = '';
-      document.getElementById('quick-paste-preview-box').classList.add('hidden');
-      fetchDashboardStats();
+      showToast('🗑️ Database wiped clean! All leads deleted.');
+      fetchLeads(1);
+      const postsCount = document.getElementById('terminal-posts-count');
+      const phonesCount = document.getElementById('terminal-phones-count');
+      if (postsCount) postsCount.textContent = '0';
+      if (phonesCount) phonesCount.textContent = '0';
+      const logWin = document.getElementById('terminal-logs-window');
+      if (logWin) logWin.innerHTML = '<div class="text-slate-500">// Database wiped clean. Ready for new scrape.</div>';
     } else {
-      showToast(res.error || 'Ingestion failed', 'error');
+      showToast(res.error || 'Failed to reset database', 'error');
     }
   } catch (err) {
-    showToast('Ingestion error', 'error');
-  }
-}
-
-// Modal Quick Post (single post)
-async function submitModalQuickPost() {
-  const rawText = document.getElementById('modal-quick-text').value.trim();
-  const posterName = document.getElementById('modal-quick-name').value.trim() || undefined;
-  const originalPostUrl = document.getElementById('modal-quick-url').value.trim() || undefined;
-
-  if (!rawText) {
-    showToast('Post text is required', 'error');
-    return;
-  }
-
-  try {
-    const res = await fetch('/api/ingest/single', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        rawText,
-        posterName,
-        originalPostUrl,
-        method: 'Manual'
-      })
-    }).then(r => r.json());
-
-    if (res.success && res.data.postsImported > 0) {
-      showToast('✅ Post successfully ingested!');
-      closeModal('quickIngestModal');
-      document.getElementById('modal-quick-text').value = '';
-      fetchDashboardStats();
-      if (currentTab === 'agents') fetchAgents(currentAgentsPage);
-    } else {
-      showToast(res.data?.errors?.[0]?.reason || 'Could not find a valid Nigerian phone number in post', 'error');
-    }
-  } catch (err) {
-    showToast('Failed to ingest post', 'error');
-  }
-}
-
-// Fetch Browser Bookmarklet code
-async function fetchBookmarklet() {
-  try {
-    const res = await fetch('/api/clipper/bookmarklet').then(r => r.json());
-    if (res.success) {
-      const link = document.getElementById('bookmarklet-link');
-      if (link) {
-        link.href = res.data.bookmarkletCode;
-      }
-    }
-  } catch (err) {
-    console.error('Bookmarklet fetch error:', err);
-  }
-}
-
-// CSV Handlers
-function handleCsvFileUpload(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    document.getElementById('csv-paste-text').value = e.target.result;
-  };
-  reader.readAsText(file);
-}
-
-async function submitCsvIngest() {
-  const csvContent = document.getElementById('csv-paste-text').value.trim();
-  if (!csvContent) {
-    showToast('Please provide CSV content to import.', 'error');
-    return;
-  }
-
-  try {
-    const res = await fetch('/api/ingest/csv', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ csvContent })
-    }).then(r => r.json());
-
-    if (res.success) {
-      showToast(`✅ CSV imported! ${res.data.postsImported} listings processed.`);
-      document.getElementById('csv-paste-text').value = '';
-      fetchDashboardStats();
-    } else {
-      showToast(res.error || 'CSV import failed', 'error');
-    }
-  } catch (err) {
-    showToast('CSV import error', 'error');
+    showToast(`Error resetting database: ${err.message}`, 'error');
   }
 }
 
 // ==========================================
-// 5. SOURCES MANAGEMENT
+// 4. FACEBOOK SESSION & COOKIES MANAGEMENT
 // ==========================================
-async function fetchSources() {
-  try {
-    const res = await fetch('/api/sources').then(r => r.json());
-    if (!res.success) return;
-
-    const sources = res.data;
-
-    // Populate quick-paste dropdown
-    const select = document.getElementById('quick-paste-source');
-    if (select) {
-      select.innerHTML = '<option value="">Select Source (Optional)</option>' +
-        sources.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${s.location_covered})</option>`).join('');
-    }
-
-    // Render Sources Cards in Sources Tab
-    const grid = document.getElementById('sources-cards-grid');
-    if (grid) {
-      grid.innerHTML = sources.map(s => `
-        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-          <div class="flex items-start justify-between">
-            <div>
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700">${escapeHtml(s.platform)}</span>
-              <h4 class="font-bold text-slate-900 text-sm mt-1">${escapeHtml(s.name)}</h4>
-              <p class="text-xs text-slate-500">${escapeHtml(s.location_covered)} • ${escapeHtml(s.source_type)}</p>
-            </div>
-          </div>
-          <div class="p-3 rounded-lg bg-slate-50 flex items-center justify-between text-xs">
-            <div>
-              <span class="text-slate-400">Agents Found:</span>
-              <strong class="text-slate-800 ml-1">${s.total_agents || 0}</strong>
-            </div>
-            <div>
-              <span class="text-slate-400">Posts:</span>
-              <strong class="text-slate-800 ml-1">${s.total_ads || 0}</strong>
-            </div>
-          </div>
-          <div class="flex items-center justify-between text-xs pt-1">
-            <span class="text-[11px] text-slate-400">Method: ${escapeHtml(s.collection_method)}</span>
-            ${s.group_url ? `<a href="${s.group_url}" target="_blank" class="text-emerald-600 hover:underline flex items-center">Open Group &rarr;</a>` : ''}
-          </div>
-        </div>
-      `).join('');
-    }
-
-    lucide.createIcons();
-  } catch (err) {
-    console.error('Failed to fetch sources:', err);
-  }
-}
-
-async function submitAddSource() {
-  const name = document.getElementById('source-name-input').value.trim();
-  const platform = document.getElementById('source-platform-input').value;
-  const location_covered = document.getElementById('source-location-input').value.trim() || 'Ibadan';
-  const group_url = document.getElementById('source-url-input').value.trim() || null;
-  const collection_method = document.getElementById('source-method-input').value;
-
-  if (!name) {
-    showToast('Source name is required', 'error');
-    return;
-  }
-
-  try {
-    const res = await fetch('/api/sources', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        platform,
-        location_covered,
-        group_url,
-        collection_method
-      })
-    }).then(r => r.json());
-
-    if (res.success) {
-      showToast('✅ Discovery source created!');
-      closeModal('addSourceModal');
-      document.getElementById('source-name-input').value = '';
-      fetchSources();
-    }
-  } catch (err) {
-    showToast('Failed to add source', 'error');
-  }
-}
-
-// ==========================================
-// 6. OUTREACH FOLLOW-UPS
-// ==========================================
-async function fetchFollowups() {
-  try {
-    const res = await fetch('/api/outreach/pending-followups').then(r => r.json());
-    if (!res.success) return;
-
-    const followups = res.data;
-    const badge = document.getElementById('followup-count-badge');
-    const container = document.getElementById('followups-list');
-
-    badge.textContent = `${followups.length} pending`;
-
-    if (followups.length === 0) {
-      container.innerHTML = '<div class="p-6 text-center text-xs text-slate-400">No overdue follow-ups right now. Keep reaching out to new leads!</div>';
-      return;
-    }
-
-    container.innerHTML = followups.map(f => `
-      <div class="p-4 flex items-center justify-between hover:bg-slate-50 transition-all">
-        <div>
-          <div class="font-bold text-slate-900 text-xs flex items-center space-x-2">
-            <span>${escapeHtml(f.agent_name)}</span>
-            <span class="text-slate-400 font-normal">(${escapeHtml(f.primary_phone)})</span>
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">Due: ${f.follow_up_date}</span>
-          </div>
-          <p class="text-xs text-slate-600 mt-1">${escapeHtml(f.notes || 'Scheduled follow-up')}</p>
-        </div>
-        <button onclick="openAgentDetailModal('${f.agent_id}')" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3 py-1.5 rounded-lg text-xs">
-          Open Lead
-        </button>
-      </div>
-    `).join('');
-
-    lucide.createIcons();
-  } catch (err) {
-    console.error('Failed to fetch followups:', err);
-  }
-}
-
-// ==========================================
-// 7. MERGE AGENTS
-// ==========================================
-async function submitAgentMerge() {
-  const targetAgentId = document.getElementById('merge-target-id').value.trim();
-  const sourceAgentId = document.getElementById('merge-source-id').value.trim();
-
-  if (!targetAgentId || !sourceAgentId) {
-    showToast('Please provide both Agent IDs', 'error');
-    return;
-  }
-
-  try {
-    const res = await fetch('/api/agents/merge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sourceAgentId, targetAgentId })
-    }).then(r => r.json());
-
-    if (res.success) {
-      showToast('✅ Agents successfully merged!');
-      closeModal('mergeModal');
-      document.getElementById('merge-target-id').value = '';
-      document.getElementById('merge-source-id').value = '';
-      fetchAgents(currentAgentsPage);
-      fetchDashboardStats();
-    } else {
-      showToast(res.error || 'Merge failed', 'error');
-    }
-  } catch (err) {
-    showToast('Merge error', 'error');
-  }
-}
-
-// ==========================================
-// 8. CSV EXPORT
-// ==========================================
-function exportAgentsCsv() {
-  const city = document.getElementById('agent-filter-city')?.value || '';
-  const status = document.getElementById('agent-filter-status')?.value || '';
-  const min_score = document.getElementById('agent-filter-score')?.value || '0';
-
-  const params = new URLSearchParams({ city, status, min_score });
-  window.location.href = `/api/export/csv?${params.toString()}`;
-}
-
-// ==========================================
-// UTILITY HELPERS
-// ==========================================
-function formatNaira(amount) {
-  if (!amount) return '₦0';
-  return '₦' + Number(amount).toLocaleString();
-}
-
-function formatDate(isoStr) {
-  if (!isoStr) return '—';
-  try {
-    const d = new Date(isoStr);
-    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  } catch (_) {
-    return isoStr;
-  }
-}
-
-function cleanPhoneForWa(phone) {
-  if (!phone) return '';
-  return phone.replace(/[^\d]/g, '');
-}
-
-function getScoreBadgeClass(score) {
-  if (score >= 70) return 'score-badge-high';
-  if (score >= 45) return 'score-badge-medium';
-  return 'score-badge-low';
-}
-
-function getStatusBadgeClass(status) {
-  switch (status) {
-    case 'New': return 'status-badge-new';
-    case 'Qualified': return 'status-badge-qualified';
-    case 'Contacted': return 'status-badge-contacted';
-    case 'Interested': return 'status-badge-interested';
-    case 'Registered on Locari': return 'status-badge-registered';
-    case 'Do Not Contact': return 'status-badge-dnc';
-    default: return 'bg-slate-100 text-slate-700';
-  }
-}
-
-function escapeHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-// ==========================================
-// 9. AUTOMATED SCRAPER CONTROLLER
-// ==========================================
-let scraperPollInterval = null;
-
-/**
- * Intelligent Facebook URL Sanitizer
- * Automatically strips accidental text prefixes, duplicate protocols (e.g. https://wehttps://...),
- * and extracts the clean Facebook group or share link.
- */
-function sanitizeFacebookGroupUrl(input) {
-  if (!input) return '';
-  let str = String(input).trim();
-
-  // 1. Recover from accidental multi-paste or nested protocol (e.g. https://wehttps://web.facebook.com...)
-  const embeddedProtocol = str.match(/https?:\/\/[a-z0-9._-]*?(https?:\/\/[^\s"']+)/i);
-  if (embeddedProtocol) {
-    str = embeddedProtocol[1];
-  }
-
-  // 2. Extract clean Facebook Share Link (e.g. https://www.facebook.com/share/g/1HZ7NoRtjM/)
-  const shareMatch = str.match(/https?:\/\/(?:[a-zA-Z0-9-]+\.)*facebook\.com\/share\/g\/([a-zA-Z0-9_-]+)/i);
-  if (shareMatch) {
-    return `https://www.facebook.com/share/g/${shareMatch[1]}/`;
-  }
-
-  // 3. Extract clean Facebook Group Link (e.g. https://www.facebook.com/groups/320272456356519/)
-  const groupMatch = str.match(/https?:\/\/(?:[a-zA-Z0-9-]+\.)*facebook\.com\/groups\/([a-zA-Z0-9._-]+)/i);
-  if (groupMatch) {
-    const groupId = groupMatch[1];
-    if (groupId !== 'joins' && groupId !== 'feed' && groupId !== 'discover') {
-      return `https://www.facebook.com/groups/${groupId}/`;
-    }
-  }
-
-  // 4. Fallback: if valid URL on facebook.com
-  try {
-    const u = new URL(str);
-    if (u.hostname.includes('facebook.com')) {
-      return str;
-    }
-  } catch (_) {}
-
-  return str;
-}
-
-function autoCleanScraperGroupUrl(el) {
-  if (!el || !el.value) return;
-  const raw = el.value.trim();
-  if (raw.includes('facebook.com')) {
-    const cleaned = sanitizeFacebookGroupUrl(raw);
-    if (cleaned && cleaned !== raw) {
-      el.value = cleaned;
-    }
-  }
-}
-
-function clearGroupUrl() {
-  const input = document.getElementById('scraper-group-url');
-  if (input) {
-    input.value = '';
-    input.focus();
-    showToast('Group URL cleared');
-  }
-}
-
-function setGroupUrl(url) {
-  const input = document.getElementById('scraper-group-url');
-  if (input) {
-    input.value = sanitizeFacebookGroupUrl(url);
-    input.classList.add('ring-2', 'ring-blue-500');
-    setTimeout(() => input.classList.remove('ring-2', 'ring-blue-500'), 800);
-    showToast('Group URL selected!');
-  }
-}
-
-async function pasteClipboardToGroupUrl() {
-  try {
-    if (navigator.clipboard && navigator.clipboard.readText) {
-      const text = await navigator.clipboard.readText();
-      if (text && text.trim()) {
-        const input = document.getElementById('scraper-group-url');
-        if (input) {
-          const cleaned = sanitizeFacebookGroupUrl(text.trim());
-          input.value = cleaned;
-          showToast('Pasted & verified clean Facebook URL!');
-          return;
-        }
-      }
-    }
-    const input = document.getElementById('scraper-group-url');
-    if (input) {
-      input.value = '';
-      input.focus();
-      showToast('Press Ctrl+V to paste your group link', 'info');
-    }
-  } catch (_) {
-    const input = document.getElementById('scraper-group-url');
-    if (input) {
-      input.value = '';
-      input.focus();
-    }
-    showToast('Press Ctrl+V to paste into the URL field', 'info');
-  }
-}
-
-function sanitizePortalUrl(input) {
-  if (!input) return '';
-  let str = String(input).trim();
-  const embeddedProtocol = str.match(/https?:\/\/[a-z0-9._-]*?(https?:\/\/[^\s"']+)/i);
-  if (embeddedProtocol) {
-    str = embeddedProtocol[1];
-  }
-  return str;
-}
-
-function autoCleanPortalUrl(el) {
-  if (!el || !el.value) return;
-  const raw = el.value.trim();
-  if (raw.includes('propertypro.ng') || raw.includes('nigeriapropertycentre.com')) {
-    const cleaned = sanitizePortalUrl(raw);
-    if (cleaned && cleaned !== raw) {
-      el.value = cleaned;
-    }
-  }
-}
-
-function clearPortalUrl() {
-  const input = document.getElementById('scraper-portal-url');
-  if (input) {
-    input.value = '';
-    input.focus();
-    showToast('Portal URL cleared');
-  }
-}
-
-function setPortalUrl(url) {
-  const input = document.getElementById('scraper-portal-url');
-  if (input) {
-    input.value = sanitizePortalUrl(url);
-    showToast('Portal URL selected!');
-  }
-}
-
-async function pasteClipboardToPortalUrl() {
-  try {
-    if (navigator.clipboard && navigator.clipboard.readText) {
-      const text = await navigator.clipboard.readText();
-      if (text && text.trim()) {
-        const input = document.getElementById('scraper-portal-url');
-        if (input) {
-          input.value = sanitizePortalUrl(text.trim());
-          showToast('Pasted portal URL from clipboard!');
-          return;
-        }
-      }
-    }
-    const input = document.getElementById('scraper-portal-url');
-    if (input) {
-      input.value = '';
-      input.focus();
-    }
-    showToast('Press Ctrl+V to paste portal URL', 'info');
-  } catch (_) {
-    const input = document.getElementById('scraper-portal-url');
-    if (input) {
-      input.value = '';
-      input.focus();
-    }
-    showToast('Press Ctrl+V to paste portal URL', 'info');
-  }
-}
-
 async function checkFacebookSessionStatus() {
   try {
     const res = await fetch('/api/scraper/status').then(r => r.json());
-    if (!res.success) return;
-    const { profile } = res.data;
-    const badge = document.getElementById('fb-session-badge');
-    if (badge) {
-      if (profile.hasUserSession) {
-        badge.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 flex items-center';
-        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 mr-2"></span><span>Connected (ID: ${profile.userId || 'Active'})</span>`;
-      } else {
-        badge.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/20 border border-amber-500/30 text-amber-300 flex items-center';
-        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400 mr-2"></span><span>Public Mode (Ready)</span>`;
-      }
+    const pill = document.getElementById('fb-session-pill');
+    const text = document.getElementById('fb-session-text');
+    if (!pill || !text) return;
+
+    if (res.data && res.data.profile && res.data.profile.hasUserSession) {
+      pill.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center';
+      text.textContent = 'Session Connected (Live Feed)';
+    } else {
+      pill.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center';
+      text.textContent = 'Guest Mode (1 post)';
     }
   } catch (_) {}
 }
 
-async function launchFacebookLoginWindow() {
-  try {
-    // If running in cloud / remote container (e.g. Render), open session cookies modal directly
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      openModal('facebookSessionModal');
-      showToast('Cloud environment: Please paste your Facebook session cookies (c_user & xs) below.', 'info');
-      return;
-    }
-
-    showToast('🚀 Launching Chrome login window... Please log into Facebook.', 'info');
-    const res = await fetch('/api/scraper/launch-login', { method: 'POST' }).then(r => r.json());
-    if (res.success) {
-      startScraperPolling();
-      const pollTimer = setInterval(async () => {
-        await checkFacebookSessionStatus();
-        const badge = document.getElementById('fb-session-badge');
-        if (badge && badge.textContent.includes('Connected')) {
-          clearInterval(pollTimer);
-          showToast('🎉 Facebook account connected! You can now scrape any group with full access.');
-        }
-      }, 3000);
-      setTimeout(() => clearInterval(pollTimer), 180000);
-    } else {
-      openModal('facebookSessionModal');
-      showToast(res.error || 'Please provide Facebook cookies below.', 'info');
-    }
-  } catch (err) {
-    openModal('facebookSessionModal');
-    showToast('Please provide Facebook cookies below.', 'info');
-  }
-}
-
 async function saveFacebookCookiesAction() {
-  const input = document.getElementById('modal-fb-cookies-input')?.value.trim();
-  if (!input) {
-    showToast('Please paste your Facebook cookies (c_user and xs)', 'error');
+  const input = document.getElementById('modal-fb-cookies-input');
+  const cookieText = input?.value.trim();
+
+  if (!cookieText) {
+    showToast('Please paste your Facebook cookies (c_user & xs).', 'error');
+    if (input) input.focus();
     return;
   }
+
   try {
-    const res = await fetch('/api/scraper/cookies', {
+    const res = await fetch('/api/scraper/session/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookies: input })
+      body: JSON.stringify({ cookies: cookieText })
     }).then(r => r.json());
 
     if (res.success) {
-      showToast('✅ Facebook session cookies saved! Scraper is authenticated.');
+      showToast('✅ Facebook session cookies saved successfully!');
       closeModal('facebookSessionModal');
       checkFacebookSessionStatus();
     } else {
-      showToast(res.error || 'Failed to save cookies', 'error');
+      showToast(res.error || 'Failed to save session cookies', 'error');
     }
   } catch (err) {
-    showToast('Network error saving cookies', 'error');
+    showToast(`Error saving cookies: ${err.message}`, 'error');
   }
 }
 
 async function clearFacebookCookiesAction() {
   try {
-    await fetch('/api/scraper/cookies', { method: 'DELETE' });
-    showToast('Cookies cleared. Returned to public visitor mode.');
-    const input = document.getElementById('modal-fb-cookies-input');
-    if (input) input.value = '';
-    closeModal('facebookSessionModal');
-    checkFacebookSessionStatus();
-  } catch (err) {
-    showToast('Error removing cookies', 'error');
-  }
-}
-
-async function startFacebookGroupScrape() {
-  const rawGroupUrl = document.getElementById('scraper-group-url')?.value.trim();
-  const maxPosts = document.getElementById('scraper-max-posts')?.value || '30';
-  const maxScrolls = document.getElementById('scraper-max-scrolls')?.value || '10';
-  const browserMode = document.getElementById('scraper-browser-mode')?.value || 'headless';
-
-  const groupUrl = sanitizeFacebookGroupUrl(rawGroupUrl);
-  const inputEl = document.getElementById('scraper-group-url');
-  if (inputEl && groupUrl) {
-    inputEl.value = groupUrl;
-  }
-
-  if (!groupUrl || !groupUrl.includes('facebook.com') || (!groupUrl.includes('/groups/') && !groupUrl.includes('/share/g/'))) {
-    showToast('Please enter a valid Facebook Group URL (e.g. https://www.facebook.com/groups/... or https://web.facebook.com/share/g/...)', 'error');
-    if (inputEl) inputEl.focus();
-    return;
-  }
-
-  // Check if Facebook session is connected
-  try {
-    const statusRes = await fetch('/api/scraper/status').then(r => r.json()).catch(() => null);
-    const isConnected = statusRes?.data?.profile?.hasUserSession;
-    if (!isConnected) {
-      showToast('⚠️ Notice: Scraping in Public Mode. If 0 leads are returned, click "Connect Facebook Account" above.', 'info');
-    }
-  } catch (_) {}
-
-  try {
-    const btn = document.getElementById('btn-start-fb-scrape');
-    if (btn) {
-      btn.disabled = true;
-      btn.classList.add('opacity-50');
-      btn.innerHTML = '<i data-lucide="loader" class="w-5 h-5 mr-2 animate-spin"></i><span>Scraping Facebook Group...</span>';
-      lucide.createIcons();
-    }
-
-    const res = await fetch('/api/scraper/start-group', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        groupUrl,
-        maxPosts: parseInt(maxPosts, 10),
-        maxScrolls: parseInt(maxScrolls, 10),
-        headless: browserMode === 'headless'
-      })
-    }).then(r => r.json());
-
+    const res = await fetch('/api/scraper/session/clear', { method: 'POST' }).then(r => r.json());
     if (res.success) {
-      showToast('🚀 Scraper running! Watching live feed in console below...');
-      startScraperPolling();
-    } else {
-      showToast(res.error || 'Failed to start scrape', 'error');
-      if (btn) {
-        btn.disabled = false;
-        btn.classList.remove('opacity-50');
-        btn.innerHTML = '<i data-lucide="play" class="w-5 h-5 mr-2"></i><span>Start Scraping Facebook Group & Extract Agents</span>';
-        lucide.createIcons();
-      }
+      showToast('Facebook session removed. Switched to public guest mode.');
+      closeModal('facebookSessionModal');
+      checkFacebookSessionStatus();
     }
   } catch (err) {
-    showToast('Network error starting scrape', 'error');
-    const btn = document.getElementById('btn-start-fb-scrape');
-    if (btn) {
-      btn.disabled = false;
-      btn.classList.remove('opacity-50');
-      btn.innerHTML = '<i data-lucide="play" class="w-5 h-5 mr-2"></i><span>Start Scraping Facebook Group & Extract Agents</span>';
-      lucide.createIcons();
-    }
+    showToast(`Error: ${err.message}`, 'error');
   }
 }
-
-async function pasteClipboardToPortalUrl() {
-  try {
-    if (navigator.clipboard && navigator.clipboard.readText) {
-      const text = await navigator.clipboard.readText();
-      if (text && text.trim()) {
-        const input = document.getElementById('scraper-portal-url');
-        if (input) {
-          input.value = text.trim();
-          showToast('Pasted portal URL from clipboard!');
-          return;
-        }
-      }
-    }
-    const input = document.getElementById('scraper-portal-url');
-    if (input) {
-      input.focus();
-      input.select();
-      showToast('Press Ctrl+V to paste your link', 'info');
-    }
-  } catch (_) {
-    const input = document.getElementById('scraper-portal-url');
-    if (input) input.focus();
-    showToast('Press Ctrl+V to paste into the URL field', 'info');
-  }
-}
-
-async function confirmResetDatabase() {
-  if (!confirm('⚠️ Are you sure you want to delete ALL discovered leads and start completely fresh? This will wipe the database to 0 records.')) {
-    return;
-  }
-  try {
-    const res = await fetch('/api/database/reset', { method: 'POST' }).then(r => r.json());
-    if (res.success) {
-      showToast('🗑️ Database wiped clean! All test and agent records deleted.');
-      fetchDashboardStats();
-      fetchQuickScraperResults();
-      if (currentTab === 'agents') fetchAgents(1);
-      if (currentTab === 'outreach') fetchFollowups();
-    } else {
-      showToast(res.error || 'Failed to reset database', 'error');
-    }
-  } catch (err) {
-    showToast('Error resetting database: ' + err.message, 'error');
-  }
-}
-
-async function startPortalScrape() {
-  const portalUrl = document.getElementById('scraper-portal-url')?.value.trim();
-  const maxPages = document.getElementById('scraper-portal-pages')?.value || '1';
-  const browserMode = document.getElementById('scraper-portal-mode')?.value || 'headless';
-
-  if (!portalUrl) {
-    showToast('Please enter a property portal URL', 'error');
-    return;
-  }
-
-  try {
-    const btn = document.getElementById('btn-start-portal-scrape');
-    if (btn) {
-      btn.disabled = true;
-      btn.classList.add('opacity-50');
-      btn.innerHTML = '<i data-lucide="loader" class="w-5 h-5 mr-2 animate-spin"></i><span>Scraping Property Portal...</span>';
-      lucide.createIcons();
-    }
-
-    const res = await fetch('/api/scraper/start-portal', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        portalUrl,
-        maxPages: parseInt(maxPages, 10),
-        headless: browserMode === 'headless'
-      })
-    }).then(r => r.json());
-
-    if (res.success) {
-      showToast('🚀 Portal scraper started! Monitoring logs below...');
-      startScraperPolling();
-    } else {
-      showToast(res.error || 'Failed to start portal scrape', 'error');
-      if (btn) {
-        btn.disabled = false;
-        btn.classList.remove('opacity-50');
-        btn.innerHTML = '<i data-lucide="play" class="w-5 h-5 mr-2"></i><span>Scrape Property Portal & Extract Agent Phones</span>';
-        lucide.createIcons();
-      }
-    }
-  } catch (err) {
-    showToast('Error starting portal scrape', 'error');
-    const btn = document.getElementById('btn-start-portal-scrape');
-    if (btn) {
-      btn.disabled = false;
-      btn.classList.remove('opacity-50');
-      btn.innerHTML = '<i data-lucide="play" class="w-5 h-5 mr-2"></i><span>Scrape Property Portal & Extract Agent Phones</span>';
-      lucide.createIcons();
-    }
-  }
-}
-
-async function stopActiveScrape() {
-  try {
-    showToast('Stopping scrape session and releasing browser...');
-    await fetch('/api/scraper/stop', { method: 'POST' });
-    const badge = document.getElementById('terminal-status-badge');
-    if (badge) {
-      badge.textContent = 'Stopping...';
-      badge.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400';
-    }
-    const portalBadge = document.getElementById('portal-terminal-status');
-    if (portalBadge) {
-      portalBadge.textContent = 'Stopping...';
-      portalBadge.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400';
-    }
-  } catch (_) {}
-}
-
-function startScraperPolling() {
-  if (scraperPollInterval) clearInterval(scraperPollInterval);
-  scraperPollInterval = setInterval(pollScraperStatus, 1500);
-  pollScraperStatus();
-}
-
-async function fetchQuickScraperResults() {
-  try {
-    const res = await fetch('/api/agents?limit=10&sort_by=last_active_at&sort_order=DESC').then(r => r.json());
-    if (!res.success) return;
-
-    const tbody = document.getElementById('scraper-quick-results-body');
-    const portalTbody = document.getElementById('portal-quick-results-body');
-    const agents = res.data || [];
-
-    const emptyRow = `
-      <tr>
-        <td colspan="6" class="px-4 py-8 text-center text-slate-400 text-xs">
-          No agent leads in database yet. Run a scraper above to extract live leads!
-        </td>
-      </tr>
-    `;
-
-    const html = agents.length === 0 ? emptyRow : agents.map(a => `
-      <tr class="hover:bg-slate-50 transition-colors text-xs">
-        <td class="px-4 py-3 font-bold text-slate-900">
-          <span class="cursor-pointer hover:text-blue-600" onclick="openAgentDetailModal('${a.id}')">${escapeHtml(a.name)}</span>
-        </td>
-        <td class="px-4 py-3 font-mono text-emerald-700 font-bold">
-          ${escapeHtml(a.primary_phone)}
-        </td>
-        <td class="px-4 py-3 text-slate-700">
-          ${escapeHtml(a.primary_location ? a.primary_location + ', ' + a.primary_city : (a.primary_city || 'Nigeria'))}
-        </td>
-        <td class="px-4 py-3 text-slate-600">
-          ${escapeHtml(a.likely_role)}
-        </td>
-        <td class="px-4 py-3 text-center">
-          <span class="px-2 py-0.5 rounded-full font-bold ${getScoreBadgeClass(a.lead_score)}">
-            ${a.lead_score}
-          </span>
-        </td>
-        <td class="px-4 py-3 text-right space-x-1 whitespace-nowrap">
-          <a href="https://wa.me/${cleanPhoneForWa(a.whatsapp_phone || a.primary_phone)}" target="_blank" class="inline-flex items-center px-2 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-semibold" title="Chat on WhatsApp">
-            <i data-lucide="message-circle" class="w-3.5 h-3.5 mr-1"></i>WhatsApp
-          </a>
-          <a href="tel:${a.primary_phone}" class="inline-flex items-center px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold" title="Call">
-            <i data-lucide="phone" class="w-3.5 h-3.5 mr-1"></i>Call
-          </a>
-        </td>
-      </tr>
-    `).join('');
-
-    if (tbody) tbody.innerHTML = html;
-    if (portalTbody) portalTbody.innerHTML = html;
-
-    lucide.createIcons();
-  } catch (err) {
-    console.error('Error fetching quick scraper results:', err);
-  }
-}
-
-let scannedJoinedGroupsList = [];
-
-async function scanMyJoinedGroups() {
-  const btn = document.getElementById('btn-scan-groups');
-  const box = document.getElementById('scanned-groups-box');
-  const list = document.getElementById('scanned-groups-list');
-
-  try {
-    if (btn) {
-      btn.disabled = true;
-      btn.innerHTML = '<i data-lucide="loader" class="w-3.5 h-3.5 mr-1.5 animate-spin"></i>Scanning Chrome for Groups...';
-    }
-
-    showToast('Opening Chrome to scan groups your account follows...', 'info');
-
-    const res = await fetch('/api/scraper/my-groups', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ headless: true })
-    }).then(r => r.json());
-
-    if (!res.success) {
-      showToast(res.error || 'Failed to scan groups. Please log in first.', 'error');
-      return;
-    }
-
-    scannedJoinedGroupsList = res.data || [];
-    if (scannedJoinedGroupsList.length === 0) {
-      showToast('No groups found. Please ensure your Facebook account is logged in.');
-      return;
-    }
-
-    box.classList.remove('hidden');
-    list.innerHTML = scannedJoinedGroupsList.map((g, idx) => `
-      <label class="flex items-start space-x-2 p-2 rounded-lg hover:bg-white bg-slate-50 border border-slate-200 cursor-pointer">
-        <input type="checkbox" class="scanned-group-chk mt-0.5 rounded text-blue-600 focus:ring-blue-500" value="${escapeHtml(g.url)}" checked>
-        <span class="font-medium text-slate-800 text-[11px] leading-snug">${escapeHtml(g.name)}</span>
-      </label>
-    `).join('');
-
-    showToast(`✅ Found ${scannedJoinedGroupsList.length} groups you follow on Facebook!`);
-    lucide.createIcons();
-  } catch (err) {
-    showToast('Failed to scan groups: ' + err.message, 'error');
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = '<i data-lucide="list" class="w-3.5 h-3.5 mr-1.5"></i>Scan Groups I Follow';
-      lucide.createIcons();
-    }
-  }
-}
-
-function selectAllScannedGroups(val) {
-  document.querySelectorAll('.scanned-group-chk').forEach(c => c.checked = val);
-}
-
-async function scrapeSelectedJoinedGroups() {
-  const checked = Array.from(document.querySelectorAll('.scanned-group-chk:checked')).map(c => c.value);
-  if (checked.length === 0) {
-    showToast('Please check at least one group to scrape.', 'error');
-    return;
-  }
-
-  const browserMode = document.getElementById('scraper-browser-mode')?.value || 'visible';
-
-  try {
-    const res = await fetch('/api/scraper/start-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        groupUrls: checked,
-        maxPosts: 25,
-        maxScrolls: 8,
-        headless: browserMode === 'headless'
-      })
-    }).then(r => r.json());
-
-    if (res.success) {
-      showToast(`🚀 Started scraping ${checked.length} selected groups! Monitoring live terminal...`);
-      startScraperPolling();
-    } else {
-      showToast(res.error || 'Failed to start batch scrape', 'error');
-    }
-  } catch (err) {
-    showToast('Batch scrape error', 'error');
-  }
-}
-
-async function pollScraperStatus() {
-  try {
-    const res = await fetch('/api/scraper/status').then(r => r.json());
-    if (!res.success) return;
-
-    const { activeJob } = res.data;
-
-    // Facebook console elements
-    const badge = document.getElementById('terminal-status-badge');
-    const postsCount = document.getElementById('terminal-posts-count');
-    const phonesCount = document.getElementById('terminal-phones-count');
-    const logsWindow = document.getElementById('terminal-logs-window');
-    const btnFb = document.getElementById('btn-start-fb-scrape');
-
-    // Portal console elements
-    const portalBadge = document.getElementById('portal-terminal-status');
-    const portalPostsCount = document.getElementById('portal-posts-count');
-    const portalPhonesCount = document.getElementById('portal-phones-count');
-    const portalLogsWindow = document.getElementById('portal-logs-window');
-    const btnPortal = document.getElementById('btn-start-portal-scrape');
-
-    if (postsCount) postsCount.textContent = activeJob.postsFound || 0;
-    if (phonesCount) phonesCount.textContent = activeJob.phonesFound || 0;
-    if (portalPostsCount) portalPostsCount.textContent = activeJob.postsFound || 0;
-    if (portalPhonesCount) portalPhonesCount.textContent = activeJob.phonesFound || 0;
-
-    if (activeJob.running) {
-      if (badge) {
-        badge.textContent = 'Scraping in progress...';
-        badge.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 animate-pulse';
-      }
-      if (portalBadge) {
-        portalBadge.textContent = 'Scraping in progress...';
-        portalBadge.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 animate-pulse';
-      }
-    } else {
-      const statusText = activeJob.error ? 'Error / Interrupted' : 'Idle / Completed';
-      const statusBg = activeJob.error ? 'bg-red-500/20 text-red-400' : 'bg-slate-800 text-slate-400';
-
-      if (badge) {
-        badge.textContent = statusText;
-        badge.className = `px-2 py-0.5 rounded text-[10px] font-bold ${statusBg}`;
-      }
-      if (portalBadge) {
-        portalBadge.textContent = statusText;
-        portalBadge.className = `px-2 py-0.5 rounded text-[10px] font-bold ${statusBg}`;
-      }
-
-      if (btnFb) {
-        btnFb.disabled = false;
-        btnFb.classList.remove('opacity-50');
-        btnFb.innerHTML = '<i data-lucide="play" class="w-5 h-5 mr-2"></i><span>Start Scraping Facebook Group & Extract Agents</span>';
-        lucide.createIcons();
-      }
-      if (btnPortal) {
-        btnPortal.disabled = false;
-        btnPortal.classList.remove('opacity-50');
-        btnPortal.innerHTML = '<i data-lucide="play" class="w-5 h-5 mr-2"></i><span>Scrape Property Portal & Extract Agent Phones</span>';
-        lucide.createIcons();
-      }
-
-      if (scraperPollInterval && !activeJob.running) {
-        clearInterval(scraperPollInterval);
-        scraperPollInterval = null;
-        if (activeJob.completedSummary) {
-          showToast(`🎉 Scrape completed! Discovered ${activeJob.completedSummary.agentsCreated || 0} new agents.`);
-          fetchDashboardStats();
-          fetchQuickScraperResults();
-          if (currentTab === 'agents') fetchAgents(currentAgentsPage);
-        }
-      }
-    }
-
-    if (activeJob.logs && activeJob.logs.length > 0) {
-      const logsHtml = activeJob.logs.map(line => {
-        const isErr = line.includes('❌') || line.includes('Error');
-        const isWarn = line.includes('⚠️');
-        const color = isErr ? 'text-red-400' : (isWarn ? 'text-amber-400' : 'text-emerald-400');
-        return `<div class="${color}">${escapeHtml(line)}</div>`;
-      }).join('');
-
-      if (logsWindow) {
-        logsWindow.innerHTML = logsHtml;
-        logsWindow.scrollTop = logsWindow.scrollHeight;
-      }
-      if (portalLogsWindow) {
-        portalLogsWindow.innerHTML = logsHtml;
-        portalLogsWindow.scrollTop = portalLogsWindow.scrollHeight;
-      }
-    }
-  } catch (err) {
-    console.error('Polling error:', err);
-  }
-}
-
-// Initial status check on load
-document.addEventListener('DOMContentLoaded', () => {
-  fetch('/api/scraper/status')
-    .then(r => r.json())
-    .then(res => {
-      if (res.success && res.data.activeJob?.running) {
-        startScraperPolling();
-      }
-    })
-    .catch(() => {});
-});

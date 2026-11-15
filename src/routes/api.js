@@ -1144,6 +1144,9 @@ router.post('/leads', (req, res) => {
       phoneNumber = null,
       formattedWhatsApp = null,
       email = null,
+      propertyType = null,
+      location = null,
+      price = null,
       postSnippet = '',
       postUrl = null,
       status = 'New'
@@ -1159,6 +1162,9 @@ router.post('/leads', (req, res) => {
       phoneNumber,
       formattedWhatsApp: formattedWhatsApp || (phoneNumber ? formatWhatsAppUrl(phoneNumber) : null),
       email,
+      propertyType,
+      location,
+      price,
       postSnippet,
       postUrl,
       status: status || 'New'
@@ -1213,7 +1219,7 @@ router.get('/leads/export/csv', (req, res) => {
 
     const headers = [
       'Lead ID', 'Group ID', 'Group Name', 'Agent Name', 'Phone Number',
-      'WhatsApp URL', 'Email', 'Post Snippet', 'Post URL', 'Scraped At', 'Status'
+      'WhatsApp URL', 'Email', 'Property Type', 'Location', 'Price', 'Post Snippet', 'Post URL', 'Scraped At', 'Status'
     ];
 
     const escapeCsv = (val) => {
@@ -1226,12 +1232,15 @@ router.get('/leads/export/csv', (req, res) => {
     for (const l of leads) {
       csvRows.push([
         escapeCsv(l.id),
-        escapeCsv(l.groupId),
+        escapeCsv(l.groupId || ''),
         escapeCsv(l.groupName || ''),
         escapeCsv(l.agentName),
         escapeCsv(l.phoneNumber || ''),
         escapeCsv(l.formattedWhatsApp || ''),
         escapeCsv(l.email || ''),
+        escapeCsv(l.propertyType || ''),
+        escapeCsv(l.location || ''),
+        escapeCsv(l.price || ''),
         escapeCsv(l.postSnippet || ''),
         escapeCsv(l.postUrl || ''),
         escapeCsv(l.scrapedAt),
@@ -1315,6 +1324,9 @@ router.post('/ingest/raw', (req, res) => {
           phoneNumber: parsed.phoneNumber,
           formattedWhatsApp: parsed.formattedWhatsApp,
           email: parsed.email,
+          propertyType: parsed.propertyType,
+          location: parsed.location,
+          price: parsed.price,
           postSnippet: parsed.postSnippet,
           postUrl: group ? group.url : null,
           status: 'New'
@@ -1333,6 +1345,9 @@ router.post('/ingest/raw', (req, res) => {
           phoneNumber: parsed.phoneNumber,
           formattedWhatsApp: parsed.formattedWhatsApp,
           email: parsed.email,
+          propertyType: parsed.propertyType,
+          location: parsed.location,
+          price: parsed.price,
           postSnippet: parsed.postSnippet,
           postUrl: group ? group.url : null,
           status: 'New'

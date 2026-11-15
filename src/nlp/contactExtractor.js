@@ -1,8 +1,10 @@
 /**
  * Contact Extraction Engine (High-Accuracy NLP & Regex)
  * Extracts phone numbers (Nigerian, US, UK, international, obfuscated),
- * WhatsApp links, emails, agent names, and property snippets from raw text or HTML.
+ * WhatsApp links, emails, agent names, property types, locations, and prices from raw text or HTML.
  */
+
+const { extractPropertyType, extractLocation, extractRentPrice } = require('./propertyParser.js');
 
 // Nigerian mobile prefixes
 const NIGERIAN_PREFIXES = [
@@ -371,6 +373,24 @@ function parsePost(content, metadata = {}) {
   const agentName = metadata.agentName || extractAgentName(content);
   const snippet = extractSnippet(content);
 
+  const propType = extractPropertyType(content);
+  const loc = extractLocation(content);
+  const rent = extractRentPrice(content);
+
+  let formattedLoc = null;
+  if (loc.neighbourhood && loc.city && loc.city !== 'Unknown') {
+    formattedLoc = `${loc.neighbourhood}, ${loc.city}`;
+  } else if (loc.neighbourhood) {
+    formattedLoc = loc.neighbourhood;
+  } else if (loc.city && loc.city !== 'Unknown') {
+    formattedLoc = loc.city;
+  }
+
+  let formattedPrice = null;
+  if (rent && rent.amount) {
+    formattedPrice = `₦${Number(rent.amount).toLocaleString()}${rent.period ? '/' + rent.period : ''}`;
+  }
+
   return {
     agentName,
     phoneNumber: contacts.primaryPhone,
@@ -378,6 +398,9 @@ function parsePost(content, metadata = {}) {
     formattedWhatsApp: contacts.formattedWhatsApp,
     email: contacts.primaryEmail,
     allEmails: contacts.emails,
+    propertyType: propType !== 'Unspecified' ? propType : null,
+    location: formattedLoc,
+    price: formattedPrice,
     postSnippet: snippet,
     postUrl: metadata.postUrl || null,
     groupId: metadata.groupId || null,

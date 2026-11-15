@@ -623,6 +623,9 @@ async function scrapeFacebookGroup(groupUrl, options = {}) {
           phoneNumber: parsed.phoneNumber,
           formattedWhatsApp: parsed.formattedWhatsApp,
           email: parsed.email,
+          propertyType: parsed.propertyType,
+          location: parsed.location,
+          price: parsed.price,
           postSnippet: parsed.postSnippet,
           postUrl: parsed.postUrl,
           status: 'New'

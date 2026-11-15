@@ -6,6 +6,7 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/*.db-journal
+data/*.png
 data/chrome_profile/
 data/facebook_cookies.json
 !data/.gitkeep
