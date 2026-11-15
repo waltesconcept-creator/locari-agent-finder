@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test tests/*.js"
+    "test": "node tests/test_phoneParser.js && node tests/test_propertyParser.js && node tests/test_agentClassifier.js && node tests/test_ingestionPipeline.js && node tests/test_apiEndpoints.js",
+    "test:e2e": "node tests/test_propertypro_scraper.js"
   },
   "keywords": [
     "locari",
