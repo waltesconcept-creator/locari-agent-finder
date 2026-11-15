@@ -677,6 +677,13 @@ async function scrapePropertyPortal(portalUrl, options = {}) {
     activeBrowserInstance = browser;
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
+      'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'Upgrade-Insecure-Requests': '1'
+    });
 
     // Check if URL is a single listing page
     const isSingleListing = portalUrl.includes('/property/') && 
@@ -690,6 +697,8 @@ async function scrapePropertyPortal(portalUrl, options = {}) {
       appendScrapeLog('Detected single property listing URL. Scraping detailed listing & agent contact...');
       await page.goto(portalUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
       await new Promise(r => setTimeout(r, 2000));
+      const currentTitle = await page.title();
+      appendScrapeLog(`Page title: "${currentTitle}"`);
 
       const singleData = await page.evaluate(() => {
         const title = (document.querySelector('h1, h2')?.textContent || document.title).trim();
@@ -757,12 +766,20 @@ async function scrapePropertyPortal(portalUrl, options = {}) {
         await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
         await new Promise(r => setTimeout(r, 2500));
 
+        const pageTitle = await page.title();
+        appendScrapeLog(`Page title: "${pageTitle}"`);
+
+        if (pageTitle.includes('Cloudflare') || pageTitle.includes('Just a moment')) {
+          appendScrapeLog('Cloudflare challenge detected. Waiting 5s for verification...');
+          await new Promise(r => setTimeout(r, 5000));
+        }
+
         const pageCards = await page.evaluate(() => {
-          let elements = Array.from(document.querySelectorAll('.property-listing, .property-listing-grid, .property-list, [itemtype*="Product"], .listing-card, article'));
+          let elements = Array.from(document.querySelectorAll('.property-listing, .property-listing-grid, .property-list, [itemtype*="Product"], .listing-card, article, .wp-block-content, [data-prop-id], .single-room-sale, .properties-list, .property-bg-style, .result-card'));
           if (elements.length === 0) {
             elements = Array.from(document.querySelectorAll('div')).filter(d => 
-              (d.querySelector('a[href^="tel:"]') || d.querySelector('a[href*="/property/"]')) && 
-              d.innerText.length > 40 && d.innerText.length < 2000
+              (d.querySelector('a[href^="tel:"]') || d.querySelector('a[href*="/property/"]') || d.querySelector('a[href*="whatsapp"]')) && 
+              d.innerText.length > 40 && d.innerText.length < 2500
             );
           }
 
